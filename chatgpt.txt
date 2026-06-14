@@ -807,3 +807,10 @@ BITS INTEGRATION
 - If absent: has() → true, withdraw() → true (claims free), getBalance() → MAX_VALUE.
 - Bops jar: ../../Bits/build/Bops-1.1.2.jar (compileOnly).
 - Uses com.bops.api.BopsAPI for balance checks and withdrawals.
+
+---
+[2026-06-14] BRANCH CLEANUP
+- No dev branch — initialized directly on main.
+- Final main commit: d754ef2 (ChestClaims v1.0 — initial backup of full source, restored from local)
+- Dev deleted: N/A
+- Notes: Project was not a git repo; initialized and pushed to Dboxual/Chest-Claims (built on existing remote history).
