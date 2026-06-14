@@ -1,0 +1,1010 @@
+ChestClaims Changelog
+=====================
+
+v1.0.20 — 2026-06-12
+---------------------
+New Feature: Chunk Claim — claim an entire chunk with a single GUI interaction.
+
+OVERVIEW:
+Players can now claim a full 16×16 chunk column from a single GUI menu.
+No text input, no commands — the entire flow is GUI-driven and commandless,
+consistent with the server's existing design philosophy.
+
+CHANGED — New flow:
+  Sneak + right-click an unclaimed chest with shears now opens a
+  "Choose Claim Type" GUI instead of immediately starting a custom session.
+
+  Slot 11 — Custom Claim (GRASS_BLOCK): starts the existing pos1/pos2 workflow.
+  Slot 15 — Chunk Claim (BLUE_CONCRETE): auto-claims the 16×16 chunk containing
+             the anchor chest; shows a green particle preview of exact chunk
+             boundaries; opens a confirm GUI showing cost and upkeep before charging.
+
+  After clicking "Chunk Claim":
+    - Chunk bounds are computed from the anchor chest's chunk (chunkX*16 to
+      chunkX*16+15, full world height, chunkZ*16 to chunkZ*16+15).
+    - Green particle outline (0,255,128) renders the exact chunk perimeter.
+    - A hologram above the chest shows "Chunk Claim / Your chunk is highlighted /
+      Right-click the chest to confirm".
+    - Confirm GUI shows: Cost: 15 Bops, Upkeep: 2 Bops/day.
+    - Player confirms; Bops are only charged on confirmation.
+    - Insufficient Bops shows the existing "insufficient-funds" message.
+    - Overlap with existing claim shows the existing "claim-overlap" message.
+
+CHANGED — Protection and upkeep:
+  Chunk claims use the same ACTIVE/INACTIVE state machine as custom claims.
+  dailyUpkeepCost is stored as a flat value (from chunk-claims.upkeep-bops-per-day),
+  so the existing midnight upkeep cycle handles chunk claims automatically.
+  INACTIVE chunk claims lose protection exactly as custom claims do.
+
+CHANGED — config.yml additions:
+  chunk-claims:
+    enabled: true            — toggle chunk claims server-wide
+    claim-cost-bops: 15      — one-time purchase cost
+    upkeep-bops-per-day: 2   — daily upkeep cost
+    preview-particle-color: "0,255,128"
+  chunk-hologram:            — setup hologram text for chunk claim sessions
+    line1/line2/line3
+
+CHANGED — Files modified:
+  build.gradle.kts           — version bumped to 1.0.20
+  config.yml                 — added chunk-claims + chunk-hologram sections
+  ClaimSession.java          — added ClaimType enum (CUSTOM, CHUNK) + field
+  ClaimData.java             — added chunkClaim boolean field
+  ClaimStorage.java          — persist/load chunk-claim flag
+  ClaimSetupListener.java    — opens ClaimTypeSelectGUI instead of direct session;
+                               added startCustomSession() + startChunkClaimSession();
+                               added startChunkOutline() for green chunk preview
+  GUIListener.java           — handles ClaimTypeHolder clicks;
+                               executeConfirm skips volume check + uses flat
+                               chunk pricing for chunk claim sessions
+  ClaimConfirmGUI.java       — chunk-aware pricing and info item display
+  ClaimManageGUI.java        — shows "Type: Chunk Claim" row in info item for
+                               existing chunk claims
+  ClaimTypeHolder.java       — NEW: InventoryHolder for type selector GUI
+  ClaimTypeSelectGUI.java    — NEW: "Choose Claim Type" GUI (slots 11 + 15)
+  changelog.txt              — this entry
+  chatgpt.txt                — updated version and session notes
+
+v1.0.19 — 2026-06-12
+---------------------
+Economy Rebalance: claim purchase costs and upkeep significantly reduced.
+
+CONTEXT:
+Real server data showed the economy was unworkable — the wealthiest player had
+~140 Bits, most active players had 20–80 Bits, and Bits are intentionally scarce.
+At 1.0 Bop/block, even a tiny 10×5×10 claim (500 blocks) cost 500 Bops, which
+was more than most players owned outright. Upkeep at 3% compounded the problem.
+
+CHANGED — config.yml:
+- claims.price-per-block: 1.0 → 0.02
+  A 500-block claim (10×5×10) now costs 10 Bops (was 500).
+  A 1,000-block claim now costs 20 Bops (was 1,000).
+  A 2,000-block claim now costs 40 Bops (was 2,000).
+  A 5,000-block claim now costs 100 Bops (was 5,000).
+
+- upkeep.daily-cost-percent-of-purchase: 3.0 → 2.0
+  At the new purchase prices, upkeep absolute costs also drop proportionally.
+  A 1,000-block claim (20 Bops purchase) costs 0.40 Bops/day (was 30 Bops/day).
+  A 2,000-block claim (40 Bops purchase) costs 0.80 Bops/day (was 60 Bops/day).
+  A 5,000-block claim (100 Bops purchase) costs 2.00 Bops/day (was 150 Bops/day).
+
+UNCHANGED:
+- max-volume: 50,000 blocks
+- All progression and scaling logic (volume × price, percent upkeep)
+- All GUI layouts, protection logic, and upkeep mechanics
+- All display code reads stored dailyUpkeepCost — newly created claims
+  automatically reflect the new rates; existing claims are unaffected.
+
+CHANGED — Java fallback defaults updated to match new config values in:
+  ClaimConfirmGUI.java    — price-per-block 1.0→0.02, daily-cost-percent 3.0→2.0
+  GUIListener.java        — price-per-block 1.0→0.02, daily-cost-percent 3.0→2.0
+  ClaimSetupListener.java — price-per-block 1.0→0.02
+  ClaimStorage.java       — daily-cost-percent 3.0→2.0 (migration fallback)
+
+CHANGED — Files modified:
+  build.gradle.kts        — version bumped to 1.0.19
+  config.yml              — price-per-block 1.0→0.02, daily-cost-percent-of-purchase 3.0→2.0
+  ClaimConfirmGUI.java    — fallback defaults updated
+  GUIListener.java        — fallback defaults updated
+  ClaimSetupListener.java — fallback default updated
+  ClaimStorage.java       — migration fallback default updated
+  changelog.txt           — this entry
+  chatgpt.txt             — updated version and session notes
+
+
+v1.0.18 — 2026-06-11
+---------------------
+Online Player Select GUI for adding trusted players.
+
+CHANGED — Claim Access trust flow:
+- Clicking "Add Trusted Player" now opens a 54-slot "Select Player" GUI instead of
+  closing the GUI and prompting for a name in chat.
+- The selector shows eligible currently online players as PLAYER_HEAD items using
+  their player head/skin where available.
+- The claim owner is hidden from the selector.
+- Players already trusted on the claim are hidden from the selector.
+- Clicking a player head immediately adds that player's UUID to the claim's trusted
+  list, saves claims.yml, sends the existing success message, and returns to Claim Access.
+- Back button returns to the Claim Access GUI without changing trust.
+- Selector supports pagination for servers with more eligible online players than fit
+  on one page.
+- The trust system remains online-player-only.
+
+UNCHANGED:
+- Only the claim owner can use Claim Access and the new Select Player GUI.
+- Trusted players still cannot manage, delete, or change claim settings.
+- Team access behavior is unchanged.
+- WorldGuard/event-priority behavior is unchanged.
+- The existing 9 trusted players per claim limit is unchanged.
+
+REMOVED:
+- The chat name-entry trust flow and pending chat input state were removed.
+
+CHANGED — Files modified:
+  build.gradle.kts              — version bumped to 1.0.18
+  ClaimManageHolder.java        — Screen.SELECT_PLAYER plus current page/visible UUIDs
+  ClaimAccessGUI.java           — Add Trusted Player lore updated for GUI selection
+  TrustedPlayerSelectGUI.java   — new online player selection GUI
+  GUIListener.java              — selector click handling; chat trust input removed
+  plugin.yml                    — version generated as 1.0.18 during build
+  changelog.txt                 — this entry
+  chatgpt.txt                   — updated flow docs and manual checklist
+
+v1.0.17 — 2026-06-11
+---------------------
+Claim Access Management — trusted players, team access toggle, and BetterTeams integration.
+
+OVERVIEW:
+Owners can now grant individual players trust on their claim, and optionally allow
+all BetterTeams teammates to build/interact inside ACTIVE claims.
+
+NEW — Claim Access GUI:
+- Main Manage GUI now has three buttons:
+    Slot 11: Claim Outline (unchanged)
+    Slot 13: Your Claim (unchanged)
+    Slot 15: Claim Access (new — NAME_TAG icon, opens access management screen)
+- Clicking "Claim Access" opens a new 27-slot "Claim Access" GUI (light purple title).
+  Layout:
+    Row 1 (slots 0–8): trusted player PLAYER_HEAD items — click any to remove trust
+    Slot 11: Team Access toggle (LIME_DYE/GRAY_DYE, or BARRIER if BetterTeams absent)
+    Slot 13: Add Trusted Player (NAME_TAG — triggers chat input)
+    Slot 22: Back button (ARROW — returns to main Claim Management GUI)
+
+NEW — Trusted player system:
+- Owner clicks "Add Trusted Player" → GUI closes, chat prompt appears:
+    "Type the name of the player to trust, or type cancel."
+- Online player name → adds their UUID to this claim's trusted list, saves claims.yml.
+- Only online players accepted in v1 (offline UUID lookup not supported yet).
+- Up to 9 trusted players per claim (one per slot in row 1 of the access GUI).
+- Clicking a PLAYER_HEAD in row 1 removes that player from the trusted list immediately.
+
+NEW — Per-claim Team Access toggle:
+- When BetterTeams is installed: LIME_DYE/GRAY_DYE toggle in the access GUI.
+  ON → owner's BetterTeams teammates can build/break/interact in this claim.
+  OFF → teammates do not get automatic access (default).
+- Per-claim: each claim has its own toggle.
+- Persisted in claims.yml as team-access-enabled.
+- When BetterTeams is not installed: BARRIER item shown with "BetterTeams not installed." message.
+  Clicking the BARRIER does nothing. Trusted player system works normally.
+
+NEW — BetterTeams soft dependency:
+- plugin.yml: BetterTeams added to soft-depend.
+- Detected at runtime via TeamsHook.init() — logs "BetterTeams integration active." or silent.
+- API calls are reflective (no BetterTeams jar required at compile time).
+  Target: com.booksaw.betterTeams.Team.getTeam(OfflinePlayer) + Team.getMembers().
+- If BetterTeams not installed or reflection fails: team access silently returns false.
+
+CHANGED — Protection logic (ClaimProtectionListener):
+- Block break/place inside ACTIVE claim now allowed for:
+    • owner (unchanged)
+    • trusted players (new)
+    • BetterTeams teammates when team-access-enabled = true (new)
+- Anchor chest break: still blocked for all non-owners in ACTIVE claims.
+    Trusted/team players who attempt it see: "You cannot break this claim's anchor chest."
+    Other non-owners see: "You do not own this claim." (unchanged)
+- INACTIVE claims: no protection for anyone (unchanged).
+
+CHANGED — Anchor chest interaction (ClaimInteractListener):
+- Owner → Claim Management GUI (unchanged).
+- Trusted / team-member + ACTIVE claim → allowed to open the chest normally (new).
+- INACTIVE claim → anyone may interact (was already allowed).
+- Other non-owner + ACTIVE → action-bar message (unchanged).
+
+CHANGED — claims.yml schema:
+- Two new per-claim keys added to each claim entry:
+    trusted-players:   list of UUID strings (default: empty list)
+    team-access-enabled: boolean (default: false)
+- Existing claims migrate safely: both fields default to empty/false on first load.
+
+NEW — Files added:
+  gui/ClaimAccessGUI.java          — access management GUI (trusted list + team toggle + back)
+  teams/TeamsHook.java             — BetterTeams soft-dependency bridge (static, safe when absent)
+  teams/TeamsIntegration.java      — isolated reflective BetterTeams API calls
+
+CHANGED — Files modified:
+  ClaimData.java               — trustedPlayers (List<UUID>) + teamAccessEnabled (boolean) fields
+  ClaimStorage.java            — load/save trusted-players and team-access-enabled
+  ClaimManageHolder.java       — Screen.ACCESS added to enum
+  ClaimManageGUI.java          — MANAGE_ACCESS_SLOT=15 + accessItem(); openManage adds slot 15
+  GUIListener.java             — ACCESS screen handler; handleAccessClick(); chat trust input;
+                                  pendingTrustInput map; onChat/onPlayerQuit handlers
+  ClaimProtectionListener.java — hasAccess() helper; trusted/team bypass for break/place
+  ClaimInteractListener.java   — trusted/team bypass for anchor chest right-click; INACTIVE bypass
+  ChestClaimsPlugin.java       — TeamsHook.init() call on enable
+  plugin.yml                   — BetterTeams added to soft-depend
+
+
+v1.0.16 — 2026-06-10
+---------------------
+Automatic Upkeep System (Rust-style midnight auto-pay).
+
+OVERVIEW:
+Claims now maintain themselves automatically.
+Bops are withdrawn from the owner's balance at midnight each day.
+No Claim Bank, no Claim Shop, no manual payment — fully automatic.
+
+NEW — Midnight upkeep cycle:
+- Fires once per day at midnight (server wall-clock time).
+- On startup, schedules the cycle for the next midnight automatically.
+- If upkeep.enabled = false, the cycle is a no-op.
+
+NEW — Per-owner most-expensive-first processing:
+- All ACTIVE claims for an owner are sorted most-expensive-first.
+- Claims are greedily marked affordable (balance is tracked as claims are assigned).
+- All affordable claims are charged in a single Bops withdrawal.
+- Expensive claims fail before cheap ones when funds are limited.
+  Example: balance=200, claims C=300 B=150 A=50.
+    C → cannot afford (300 > 200), fails.
+    B → can afford (150 ≤ 200), paid. running balance = 50.
+    A → can afford (50 ≤ 50), paid.
+    Total withdrawn: 200 Bops. C deactivated.
+
+NEW — Online payment failure (5-minute countdown):
+- If owner is ONLINE and a claim cannot be paid at midnight:
+    1. Claim is marked "Payment Due" (runtime only, not persisted).
+    2. Owner receives chat message: "Your claim requires N Bops for upkeep.
+       You have 5 minutes to obtain enough Bops or protection will end."
+    3. Server checks every 5 seconds if the owner now has enough Bops.
+    4. If yes: deducts automatically, claim stays ACTIVE, confirms in chat.
+    5. If owner goes OFFLINE during countdown: claim immediately INACTIVE.
+    6. If 5 minutes expire without payment: claim becomes INACTIVE.
+
+NEW — Offline payment failure (instant):
+- If owner is OFFLINE and a claim cannot be paid: claim immediately INACTIVE.
+  No countdown, no warning, no delay.
+
+NEW — Hologram "Payment Due" state:
+- While a claim is in the online countdown, hologram shows "Payment Due" (yellow).
+- Returns to "Active" (green) if payment succeeds.
+- Becomes "Inactive" (red) if countdown expires or owner goes offline.
+
+NEW — First day free:
+- Claims created today (after the most recent midnight) are skipped by the
+  current midnight cycle. First upkeep charge is at the NEXT midnight.
+  Example: created Monday 4 PM → first charge Tuesday midnight.
+
+NEW — /claims cycle (admin command):
+- Manually triggers the midnight upkeep cycle for testing.
+- Requires chestclaims.admin permission (same as /claims reload).
+
+NEW — Claim deletion cancels countdown:
+- If a claim is deleted while in a Payment Due countdown, the countdown
+  task is cancelled immediately to prevent any further state changes.
+
+REMOVED — Periodic upkeep state check:
+- The old upkeep.check-interval-minutes config key and periodic checkUpkeep()
+  task are removed. The midnight cycle replaces this entirely.
+- Old manual payUpkeep() / payUpkeepMax() methods removed from UpkeepManager
+  (Claim Shop was already removed in v1.0.14).
+
+CHANGED — config.yml:
+- Removed: upkeep.check-interval-minutes (no longer used)
+
+CHANGED — plugin.yml:
+- Updated /claims usage: added "cycle" subcommand.
+
+CHANGED — Files modified:
+  UpkeepManager.java        — complete rewrite: midnight cycle, auto-pay, countdown
+  ChestClaimsPlugin.java    — removed periodic checkUpkeep(); added upkeepManager.init()/shutdown()
+  ClaimHologramManager.java — buildUpkeepStatusLine() now shows "Payment Due" (yellow)
+  GUIListener.java          — deleteClaim() cancels countdown before removing claim
+  ClaimsCommand.java        — added /claims cycle subcommand
+  config.yml                — removed check-interval-minutes
+  plugin.yml                — updated /claims usage string
+
+
+v1.0.15 — 2026-06-10
+---------------------
+Upkeep Cost Rebalance: 1% → 3% per cycle.
+
+CHANGED — config.yml:
+- upkeep.daily-cost-percent-of-purchase: 1.0 → 3.0
+  A claim that cost 500 Bops now costs 15 Bops/Day (was 5 Bops/Day).
+  A claim that cost 1,000 Bops now costs 30 Bops/Day (was 10 Bops/Day).
+  A claim that cost 5,000 Bops now costs 150 Bops/Day (was 50 Bops/Day).
+  A claim that cost 10,000 Bops now costs 300 Bops/Day (was 100 Bops/Day).
+  Still fully configurable via the config key.
+
+CHANGED — Fallback defaults updated to 3.0 in:
+- ClaimConfirmGUI.java    — upkeep preview in confirm GUI
+- GUIListener.java        — dailyUpkeepCost computed at purchase time
+- ClaimStorage.java       — migration fallback for claims missing the field
+  (was an outdated 5.0 stale default from v1.0.6 — now consistent with config)
+
+No display logic changes — confirm GUI, claim management GUI, and hologram
+all read the stored dailyUpkeepCost (set at purchase) so they reflect the
+new rate automatically for all newly created claims.
+
+CHANGED — Files modified:
+  config.yml           — daily-cost-percent-of-purchase 1.0 → 3.0
+  ClaimConfirmGUI.java — fallback default 1.0 → 3.0
+  GUIListener.java     — fallback default 1.0 → 3.0
+  ClaimStorage.java    — fallback default 5.0 → 3.0
+
+
+v1.0.14 — 2026-06-10
+---------------------
+Claim Shop Removed + Upkeep Cost Visibility + Configurable Cycle Name + WorldGuard Compatibility.
+
+REMOVED — Claim Shop GUI entirely:
+- NETHER_STAR "Claim Shop" button removed from main management GUI.
+- Shop screen (Pay 1 Day / Pay 3 Days / Pay 7 Days / Back) removed.
+- ClaimManageHolder.Screen.SHOP removed from enum.
+- GUIListener shop click handling removed (SHOP screen handler + SHOP_SLOT click).
+- All shop slot constants removed from ClaimManageGUI
+  (SHOP_SLOT, SHOP_PAY_1DAY_SLOT, SHOP_PAY_3DAY_SLOT, SHOP_PAY_7DAY_SLOT, SHOP_BACK_SLOT).
+- UpkeepManager no longer injected into GUIListener (payUpkeep() not called from GUI).
+
+CHANGED — Main Claim Management GUI layout:
+- Now only two items:
+    Slot 11: LIME_DYE / GRAY_DYE — Claim Outline toggle
+    Slot 13: CHEST — "Your Claim" info (centered)
+  All other slots empty — Bedrock-friendly, no glass fillers.
+
+CHANGED — Chest info item lore (slot 13, Claim Management):
+- Now shows: Owner / Price Paid / Upkeep cost per cycle.
+- "Upkeep:" line replaced from time-remaining to cost per cycle:
+    e.g. "Upkeep: 50 Bops / Day"
+- Controlled by upkeep.cycle-name config key.
+- If upkeep.enabled = false: shows "Upkeep: Disabled" (gray).
+
+NEW — config.yml:
+- upkeep.cycle-name: "Day"  — display label for the upkeep period in all GUIs and holograms.
+- upkeep.enabled: true       — upkeep now on by default (was false).
+
+CHANGED — Claim Confirm GUI (ClaimConfirmGUI):
+- Confirm item lore changed from "Blocks / Price" to "Claim Price / Upkeep".
+- Info item (CHEST) lore updated to match.
+- Both items now show upkeep cost per cycle when upkeep is enabled.
+  Example: "Claim Price: 5,000 Bops" + "Upkeep: 50 Bops / Day"
+- ClaimConfirmGUI.open() now accepts ChestClaimsPlugin instead of pricePerBlock
+  (reads config directly).
+
+CHANGED — Completed claim hologram (ClaimHologramManager):
+- Rate line now uses cycle-name: "50 Bops / Day" → reads from config.
+- Status line simplified: no longer shows time remaining — just "Active" (green)
+  or "Inactive" (red).
+
+REMOVED — config.yml:
+- max-prepaid-days: 30 (no more prepaid shop).
+
+NEW — WorldGuard compatibility:
+- ChestClaims never overrides a WorldGuard cancellation.
+- All block and interaction event handlers now run at EventPriority.HIGHEST with
+  ignoreCancelled = true. WorldGuard (and other protection plugins) use HIGH, so they
+  always process and cancel events before ChestClaims sees them.
+- Affected handlers:
+    ClaimSetupListener.onInteract     — was HIGH          → HIGHEST, ignoreCancelled=true
+    ClaimInteractListener.onChestInteract — was NORMAL    → HIGHEST, ignoreCancelled=true
+    ClaimProtectionListener.onBlockBreak  — was HIGH      → HIGHEST  (ignoreCancelled already set)
+    ClaimProtectionListener.onBlockPlace  — was HIGH      → HIGHEST  (ignoreCancelled already set)
+- Effect: if WorldGuard blocks a block break, place, or interaction, ChestClaims does nothing:
+    no delete GUI, no management GUI, no claim setup, no protection check.
+
+CHANGED — Files modified:
+  ClaimManageHolder.java        — removed Screen.SHOP
+  ClaimManageGUI.java           — removed shop slots/methods; updated lore to show cost/cycle
+  GUIListener.java              — removed UpkeepManager dep; removed shop screen handler
+  ClaimConfirmGUI.java          — updated signature + lore (claim price + upkeep preview)
+  ClaimSetupListener.java       — HIGHEST priority; ignoreCancelled=true; pass plugin to open()
+  ClaimInteractListener.java    — HIGHEST priority; ignoreCancelled=true
+  ClaimProtectionListener.java  — HIGHEST priority (ignoreCancelled was already set)
+  ClaimHologramManager.java     — cycle-name in rate line; simplified status to Active/Inactive
+  ChestClaimsPlugin.java        — updated GUIListener instantiation (no upkeepManager arg)
+  config.yml                    — added cycle-name; upkeep.enabled true; removed max-prepaid-days
+
+
+v1.0.13 — 2026-06-10
+---------------------
+Grace Period Removal + Upkeep Simplification + Hologram Dashboard.
+
+CHANGED — ClaimState: GRACE removed entirely.
+- Enum now has only ACTIVE and INACTIVE.
+- Lifecycle: ACTIVE → INACTIVE (direct, no grace buffer).
+
+CHANGED — UpkeepManager.checkUpkeep():
+- Removed ACTIVE→GRACE transition and all grace-period logic.
+- Expired upkeep now moves claim straight to INACTIVE.
+
+CHANGED — UpkeepManager.payUpkeep():
+- Simplified to set state = ACTIVE unconditionally (no graceStartedAt reset needed).
+
+CHANGED — ClaimData:
+- Removed graceStartedAt field, getter, and setter.
+
+CHANGED — ClaimStorage:
+- Removed grace-started-at save/load.
+- Added GRACE migration: if a saved claim has state "GRACE" (from old data), it loads as INACTIVE.
+
+CHANGED — Default upkeep formula:
+- daily-cost-percent-of-purchase: 5.0 → 1.0
+- A 1,000 Bops claim now costs 10 Bops/day (was 50 Bops/day).
+
+REMOVED — config.yml:
+- grace-period-hours: 48 removed entirely.
+
+CHANGED — Completed claim hologram (ClaimHologramManager):
+- Now a 4-line upkeep dashboard when upkeep enabled:
+    Line 1: "[owner]'s Claim"          (gold bold)
+    Line 2: "25 Bops/Day"              (gray — daily rate)
+    Line 3: "Upkeep: N Days Remaining" (green/yellow/red)
+    Line 4: hint text                  (configurable)
+  When INACTIVE:
+    Line 2: daily rate / Line 3: "Inactive" (red)
+  When upkeep disabled:
+    Line 2: "Upkeep Disabled" (gray) / no rate line
+
+CHANGED — GUI (ClaimManageGUI + GUIListener):
+- All GRACE cases removed from infoUpkeepText(), infoUpkeepColor(), upkeepSummary(), upkeepSummaryColor().
+
+CHANGED — ClaimProtectionListener:
+- Comment updated: "ACTIVE/GRACE: block non-owners" → "ACTIVE: block non-owners".
+
+CHANGED — Files modified:
+  ClaimState.java              — removed GRACE
+  ClaimData.java               — removed graceStartedAt
+  ClaimStorage.java            — removed grace fields; added GRACE migration
+  UpkeepManager.java           — simplified checkUpkeep() and payUpkeep()
+  ClaimManageGUI.java          — removed GRACE from all upkeep display methods
+  GUIListener.java             — removed GRACE cases
+  ClaimHologramManager.java    — new dashboard format; added NumberFormat/Locale imports
+  ClaimProtectionListener.java — comment cleanup
+  config.yml                   — daily percent 5.0→1.0; removed grace-period-hours
+
+
+v1.0.12 — 2026-06-10
+---------------------
+Claim Shop Rename + Hologram Cleanup + Team-Ready Structure.
+
+CHANGED — "Claim Upgrades" renamed to "Claim Shop" everywhere:
+- Main GUI button (NETHER_STAR, slot 15): display name "Claim Upgrades" → "Claim Shop".
+- Shop GUI title: "Claim Upgrades" → "Claim Shop".
+- ClaimManageHolder.Screen.UPGRADES → Screen.SHOP.
+- ClaimManageGUI constants: UPGRADES_SLOT → SHOP_SLOT, UPGRADES_PAY_*_SLOT → SHOP_PAY_*_SLOT,
+  UPGRADES_BACK_SLOT → SHOP_BACK_SLOT.
+- ClaimManageGUI.openUpgrades() → openShop().
+
+CHANGED — Claim Shop pay button lore:
+- Cost now formatted with commas (e.g. "1,500 Bops" instead of "1500.00 Bops").
+- "day(s)" corrected to "day" or "days" based on count.
+
+CHANGED — Completed claim hologram (ClaimHologramManager):
+- Removed: dimensions line (WxHxD) — hologram is now clean and minimal.
+- New layout:
+    Line 1: "[owner]'s Claim"       (gold bold, configurable via completed-hologram.line1)
+    Line 2: Upkeep status           (dynamic; only shown when upkeep.enabled = true)
+    Line 3: Hint text               (configurable via completed-hologram.line3)
+  Examples:
+    David's Claim / Upkeep: 3 Days Remaining / Right-click chest to manage
+    David's Claim / Upkeep Expired / Right-click chest to manage
+    David's Claim / Right-click chest to manage  (upkeep disabled)
+
+NEW — resolveOwnerDisplay() in ClaimHologramManager:
+- Private helper that returns the display name used in the hologram line 1.
+- Currently returns claim.getOwnerName() (unchanged behaviour).
+- Stubbed with a comment for future team support:
+    when team ownership is added, return team name here instead of player name.
+- No external API or storage changes required to wire in team support later.
+
+CHANGED — Files modified:
+  ClaimManageHolder.java     — Screen.UPGRADES → Screen.SHOP
+  ClaimManageGUI.java        — renamed all UPGRADES constants/methods → SHOP;
+                               cost formatting in pay buttons; expanded comments
+  GUIListener.java           — Screen.SHOP + SHOP_* slot constants + openShop()
+  ClaimHologramManager.java  — removed dimensions line; added resolveOwnerDisplay()
+
+
+v1.0.11 — 2026-06-10
+---------------------
+Simplified Chest Icon Lore.
+
+CHANGED — Claim Management GUI — center CHEST info item (slot 13):
+- Removed: Size (WxHxD), Blocks, Created date, Anchor coordinates.
+- Kept:    Owner, Price Paid, Upkeep status.
+- New lore:
+    Owner:      <name>
+    Price Paid: <cost> Bops   (comma-formatted, e.g. "12,500 Bops")
+    Upkeep:     <status>
+      upkeep disabled  → "Disabled"  (gray)
+      ACTIVE, ≥1 day   → "N Days Remaining"   (green)
+      ACTIVE, <1 day   → "N Hours Remaining"  (yellow)
+      ACTIVE, not set  → "Active"             (green)
+      GRACE            → "Grace Period"        (yellow)
+      INACTIVE         → "Expired"            (red)
+
+No storage, protection, or upkeep logic changed.
+
+CHANGED — Files modified:
+  ClaimManageGUI.java  — infoItem() simplified; added infoUpkeepText/infoUpkeepColor helpers;
+                         removed unused imports (Location, Instant, LocalDate, ZoneId)
+
+
+v1.0.10 — 2026-06-10
+---------------------
+GUI Redesign + Upkeep Hologram + Claim Outline Toggle.
+
+CHANGED — Main Claim Management GUI (ClaimManageGUI):
+- Removed: CLOCK "Upkeep Status" icon from main GUI (slot 13).
+- Removed: Pay 1 Day, Pay 3 Days, Pay Max buttons from main GUI.
+- Added:   OUTLINE TOGGLE button (slot 11, left) — LIME_DYE when on, GRAY_DYE when off.
+           Lets owner toggle a persistent particle outline visible to nearby players.
+- Moved:   CHEST info item to center (slot 13) — now the focal point of the GUI.
+           Info item now shows claim dimensions (WxHxD) in lore in addition to existing fields.
+- Added:   UPGRADES button (slot 15, right) — NETHER_STAR, opens new Upgrades screen.
+           Lore previews current upkeep status and invites player to click.
+
+NEW — Claim Upgrades GUI (ClaimManageGUI.openUpgrades):
+- Opens a dedicated 3-row "Claim Upgrades" inventory (title: "Claim Upgrades", aqua).
+- Slot 10: EMERALD "Pay 1 Day"
+- Slot 13: GOLD_INGOT "Pay 3 Days"
+- Slot 16: GOLD_BLOCK "Pay 7 Days"
+- Slot 22: ARROW "Back" — returns to main Claim Management GUI.
+- Designed for future expansion (larger claim sizes, extra trust slots, cosmetics, etc.).
+- All pay buttons show cost in lore; show "Upkeep is not enabled." if disabled.
+- After a pay action the Upgrades GUI reopens automatically (1-tick deferred).
+
+NEW — ClaimManageHolder.Screen.UPGRADES added to screen enum.
+
+CHANGED — Claim Hologram (ClaimHologramManager):
+- Line 1: "{owner}'s Claim" — configurable, gold bold (unchanged).
+- Line 2: Claim dimensions — computed (e.g. "16x4x16"), gray. Replaces old {state} line.
+- Line 3: Upkeep status — dynamic, shown only when upkeep.enabled = true:
+    ACTIVE, ≥1 day:   "Upkeep: N Days Remaining"  (green)
+    ACTIVE, <1 day:   "Upkeep: N Hours Remaining"  (yellow)
+    ACTIVE, not set:  "Upkeep: Active"             (green)
+    GRACE:            "Upkeep: Grace Period"        (yellow)
+    INACTIVE:         "Upkeep Expired"              (red)
+- Line 4: Hint text — configurable via completed-hologram.line3 (unchanged).
+- Config key completed-hologram.line2 removed (no longer used).
+
+NEW — Claim Outline System (ClaimOutlineTask + ClaimData.outlineEnabled):
+- Owner toggles outline on/off from the main Claim Management GUI.
+- When enabled, all nearby players (within claim-outline.view-distance-blocks, default 32)
+  see a DUST particle outline drawn around the claim boundaries every update-ticks ticks.
+- Outline color: cyan (0,200,255) by default — distinct from the shears/selection orange.
+- Performance: one server-wide repeating task sends per-player particles only when
+  the player is within range. No permanent world state.
+- Bedrock-compatible (DUST particles work via Geyser).
+- Persisted in claims.yml as outline-enabled: true/false (default false on migration).
+
+NEW — Config section: claim-outline
+  claim-outline.enabled               bool,   default true
+  claim-outline.view-distance-blocks  double, default 32
+  claim-outline.update-ticks          int,    default 20
+  claim-outline.particle-color        "R,G,B", default "0,200,255"
+
+NEW — Files added:
+  listener/ClaimOutlineTask.java  — server-wide repeating task for owner-toggled outlines
+
+CHANGED — Files modified:
+  ClaimData.java          — outlineEnabled boolean field + getter/setter
+  ClaimStorage.java       — load/save outline-enabled
+  ClaimManageHolder.java  — UPGRADES added to Screen enum
+  ClaimManageGUI.java     — full GUI redesign
+  GUIListener.java        — handles outline toggle + UPGRADES screen clicks
+  ClaimHologramManager.java — dynamic upkeep + dimensions lines
+  ChestClaimsPlugin.java  — starts ClaimOutlineTask on enable
+  config.yml              — claim-outline section added; completed-hologram.line2 removed
+
+
+v1.0.9 — 2026-06-09
+---------------------
+Claim Hologram + Better Setup Feedback.
+
+NEW — Completed claim hologram (ClaimHologramManager):
+- A floating TextDisplay appears above each confirmed claim anchor chest.
+- Visible only to players within view-distance-blocks (default 5). Uses per-player
+  show/hide (setVisibleByDefault false) — no permanent world clutter.
+- Hologram text updates every 0.5 s to reflect current claim state (ACTIVE/GRACE/INACTIVE).
+- State name is automatically colored: green (ACTIVE), yellow (GRACE), red (INACTIVE).
+- Default lines:
+    Line 1: <owner>'s Claim (gold bold)
+    Line 2: <state> (state-colored)
+    Line 3: Right-click chest to manage (gray)
+- Loads holograms for all existing claims on plugin enable (world must be loaded).
+- Spawned when a new claim is confirmed; removed when a claim is deleted.
+- Non-persistent (disappears on server restart and is re-created on next enable).
+- No duplicate holograms across reloads (in-memory map guards re-spawn).
+
+NEW — Config section: completed-hologram
+  completed-hologram.enabled                bool,   default true
+  completed-hologram.view-distance-blocks   double, default 5.0
+  completed-hologram.height-offset          double, default 1.35
+  completed-hologram.line1                  string, placeholder {owner}
+  completed-hologram.line2                  string, placeholder {state}
+  completed-hologram.line3                  string
+
+NEW — Sounds (setup flow):
+  sounds.setup-started         — played when claim setup session begins
+  sounds.pos1-set              — played when Pos1 is selected
+  sounds.pos2-set              — played when Pos2 is selected
+  sounds.shears-lost-cancelled — played when session auto-cancels due to shears loss
+                                  (distinct pitch from intentional setup-cancelled)
+
+NEW — Sounds (upkeep):
+  sounds.upkeep-paid           — played on successful upkeep payment
+
+CHANGED — sounds.confirmation-open default:
+  sound: BLOCK_NOTE_BLOCK_PLING → BLOCK_NOTE_BLOCK_BELL (more distinct bell sound)
+  (existing server configs keep their configured value; only new installs get the bell)
+
+CHANGED — Files modified:
+  ChestClaimsPlugin.java    — creates/inits/shuts down ClaimHologramManager
+  GUIListener.java          — calls onClaimCreated / onClaimDeleted on hologram manager
+  ClaimSetupListener.java   — plays setup-started, pos1-set, pos2-set, shears-lost-cancelled
+  UpkeepManager.java        — plays upkeep-paid on success
+
+NEW — Files added:
+  ClaimHologramManager.java — manages claim TextDisplay entities + proximity task
+
+
+v1.0.8 — 2026-06-09
+---------------------
+Shears Claim Border Preview.
+
+NEW — Claim border preview (holding shears):
+- Any player holding shears in their main hand sees particle outlines around nearby
+  confirmed claims in their current world.
+- Shows borders for ACTIVE and GRACE claims only; INACTIVE claims are not shown.
+- Works for all claims, not just the player's own.
+- Borders use the same DUST particle color and size as the selection outline
+  (selection-outline.particle-color / particle-size).
+- Corners are drawn larger than edges, matching the selection outline style.
+
+NEW — Config section: claim-border-preview
+  claim-border-preview.enabled          bool,  default true
+  claim-border-preview.radius-blocks    int,   default 64
+  claim-border-preview.update-ticks     int,   default 20
+  claim-border-preview.max-claims-shown int,   default 8
+
+BEHAVIOR:
+- Border preview starts the moment the player equips shears (hotbar switch or login).
+- Border preview stops when shears are unequipped, swapped to off-hand, or on logout.
+- During an active claim setup session, border preview is suppressed (setup outline
+  takes priority); it resumes automatically once the session ends.
+- Deleted claims disappear from the border on the next refresh tick (≤ update-ticks).
+- No commands, no clicking required.
+
+NEW — Files added:
+  listener/ClaimBorderListener.java   Event-driven start/stop of per-player border task.
+  listener/ClaimBorderTask.java       Per-player BukkitRunnable that draws nearby borders.
+
+CHANGED — OutlineTask.java:
+  drawOutline() visibility: private → package-private (used by ClaimBorderTask).
+
+CHANGED — ChestClaimsPlugin.java:
+  Registers ClaimBorderListener.
+
+
+v1.0.7 — 2026-06-09
+---------------------
+Remove glass pane GUI fillers (Bedrock/Geyser compatibility).
+
+CHANGED — ClaimConfirmGUI:
+- Removed gray glass pane filler from all unused slots (slots now empty).
+- "Confirm Purchase" button: LIME_STAINED_GLASS_PANE → LIME_CONCRETE.
+- "Cancel" button: RED_STAINED_GLASS_PANE → RED_CONCRETE.
+
+CHANGED — ClaimManageGUI (manage screen):
+- Removed gray glass pane filler from all unused slots.
+- "Pay 1 Day" button: LIME_STAINED_GLASS_PANE → EMERALD.
+- "Pay 3 Days" button: YELLOW_STAINED_GLASS_PANE → GOLD_INGOT.
+- "Pay Max" button: GOLD_BLOCK (unchanged).
+
+CHANGED — ClaimManageGUI (delete-confirm screen):
+- Removed gray glass pane filler from all unused slots.
+- "Yes, Delete Claim" button: RED_STAINED_GLASS_PANE → RED_CONCRETE.
+- "No, Keep Claim" button: LIME_STAINED_GLASS_PANE → LIME_CONCRETE.
+
+No slot numbers, click logic, or gameplay behaviour changed.
+
+
+v1.0.6 — 2026-06-09
+---------------------
+Upkeep Foundation.
+
+NEW — Claim states:
+- ACTIVE   : claim is protected and upkeep is current (or upkeep not yet configured).
+- GRACE    : upkeep has expired; claim is still protected during the grace window.
+- INACTIVE : grace period has elapsed; claim loses all protection.
+- Transitions: ACTIVE → GRACE when upkeep-paid-until passes.
+               GRACE → INACTIVE when grace-period-hours after grace start elapses.
+               Any state → ACTIVE when the player pays upkeep (upkeep-paid-until extended).
+
+NEW — Per-claim upkeep fields (stored in claims.yml):
+- state                  : ACTIVE / GRACE / INACTIVE (default ACTIVE on migration)
+- upkeep-paid-until      : epoch ms of when upkeep expires (0 = not yet set)
+- grace-started-at       : epoch ms of when grace period began (0 = not in grace)
+- daily-upkeep-cost      : precomputed daily cost in Bops (cost × daily-cost-percent / 100)
+
+NEW — Migration:
+- Existing claims load safely: state defaults to ACTIVE, upkeep-paid-until defaults to 0.
+- Claims with upkeep-paid-until = 0 are skipped by the state-check task (never expire).
+- daily-upkeep-cost recomputed from config on first load if missing from the file.
+
+NEW — config section: upkeep
+  upkeep.enabled                          bool,   default false
+  upkeep.daily-cost-percent-of-purchase   double, default 5.0
+  upkeep.grace-period-hours               long,   default 48
+  upkeep.max-prepaid-days                 int,    default 30
+  upkeep.check-interval-minutes           int,    default 60
+
+NEW — UpkeepManager (com.chestclaims.upkeep.UpkeepManager):
+- checkUpkeep()         : transitions claim states; called on a repeating task.
+- payUpkeep(player, claim, days) : charges Bops, extends upkeep-paid-until, saves.
+- payUpkeepMax(player, claim)    : pays as many days as affordable up to max-prepaid-days.
+
+CHANGED — Claim Management GUI (manage screen):
+- Slot 13: CLOCK "Upkeep Status" item — state, paid-until, daily cost, grace warning.
+- Slot 19: LIME glass  "Pay 1 Day"  — shows cost in lore.
+- Slot 22: YELLOW glass "Pay 3 Days" — shows cost in lore.
+- Slot 25: GOLD block  "Pay Max"     — pays up to max-prepaid-days cap.
+- If upkeep.enabled = false, buttons and status item indicate upkeep is disabled.
+- After a pay action the GUI reopens automatically (1-tick deferred) to reflect new state.
+
+CHANGED — Protection:
+- INACTIVE claims have no block-break or block-place protection for non-owners.
+- ACTIVE and GRACE claims protect as before.
+- Owner always gets the delete-confirm GUI when breaking the anchor regardless of state.
+- Non-owner breaking an INACTIVE anchor chest is now allowed (no cancellation).
+
+CHANGED — ClaimProtectionListener:
+- Now accepts ChestClaimsPlugin to read claim state for protection decisions.
+
+CHANGED — ClaimInteractListener / GUIListener:
+- openManage() now takes ChestClaimsPlugin to read upkeep config for GUI rendering.
+
+
+v1.0.5 — 2026-06-09
+---------------------
+Confirmation sounds.
+
+NEW — Sound feedback for key claim setup events:
+- confirmation-open  : played when the confirm GUI opens (right-click anchor after
+                       both positions are set). Default: BLOCK_NOTE_BLOCK_PLING.
+- claim-confirmed    : played on successful claim purchase. Default: ENTITY_PLAYER_LEVELUP.
+- setup-cancelled    : played on intentional cancellation — Sneak+F or the GUI cancel
+                       button. Default: BLOCK_NOTE_BLOCK_BASS.
+- invalid-action     : played when a confirm attempt is rejected (anchor outside region,
+                       claim overlap, volume exceeded, insufficient funds).
+                       Default: ENTITY_VILLAGER_NO.
+
+NEW — config section: sounds
+  Each entry has: enabled (bool), sound (Bukkit Sound enum name),
+  volume (float), pitch (float).
+  Unknown sound names log a warning and play nothing.
+
+NEW — SoundUtil helper class (com.chestclaims.SoundUtil).
+
+
+v1.0.4 — 2026-06-09
+---------------------
+Claim deletion via chest break; shears-lost session cancellation.
+
+CHANGED — Claim deletion flow:
+- Confirmed claim anchor chests can no longer be directly broken.
+  Breaking the anchor chest now opens a "Delete Claim?" confirmation GUI instead.
+  The chest block does NOT disappear until the owner confirms.
+  This works in both survival and creative mode.
+- Owner breaks anchor chest → "Delete Claim?" GUI (3 rows):
+    Slot 10: RED glass "Yes, Delete Claim"
+    Slot 13: BARRIER "Are you sure?"
+    Slot 16: LIME glass "No, Keep Claim"
+  "Yes" → claim removed from memory + claims.yml, then chest block breaks naturally
+           (chest item + contents drop at the location). No Bops refund.
+  "No" → GUI closes, claim and chest untouched.
+- Non-owner breaks anchor chest → blocked, action bar: "You do not own this claim."
+- Non-owner breaking any other block inside a claim → unchanged behaviour.
+
+CHANGED — Claim Management GUI:
+- Removed the "Delete Claim" button from the manage screen.
+  Manage screen is now info-only (owner, blocks, price, date, anchor coords).
+  Deletion is triggered exclusively by attempting to break the anchor chest.
+
+NEW — Shears-lost session cancellation:
+- If the player no longer holds shears in their main hand during claim setup,
+  the session is automatically cancelled with chat message:
+  "Claim setup cancelled because you stopped holding shears."
+- Detected via:
+    PlayerItemHeldEvent   — hotbar slot switch
+    PlayerDropItemEvent   — dropping the shears
+    PlayerSwapHandItemsEvent (non-sneak F) — swapping shears to off-hand
+    Repeating task (every 5 ticks / 0.25 s) — fallback for all other inventory changes
+- Sneak+F intentional cancel behaviour unchanged (event cancelled, session ends).
+- Config message: messages.shears-lost
+
+NEW — config key:
+- messages.shears-lost
+
+
+v1.0.3 — 2026-06-09
+---------------------
+Commandless gameplay overhaul. Normal claim management requires no slash commands.
+
+NEW — Claim Management GUI (right-click your claim chest):
+- Owner right-clicks their claim anchor chest → opens 3-row "Claim Management" GUI.
+  Slot 11: CHEST info item (owner, blocks, price paid, created date, anchor coords).
+  Slot 15: BARRIER "Delete Claim" button.
+- Clicking Delete opens a 3-row "Delete Claim?" confirmation GUI:
+  Slot 10: RED glass "Yes, Delete Claim"
+  Slot 13: BARRIER "Are you sure?" (warning)
+  Slot 16: LIME glass "No, Keep Claim"
+- Confirming deletion removes the claim from storage and saves immediately.
+- All other slots filled with gray glass. No interaction possible outside of buttons.
+
+NEW — Non-owner interaction message:
+- Non-owner right-clicks a claimed chest → action bar:
+  "This claim belongs to <owner>."  (configurable via messages.not-owner)
+- Chest does not open. No GUI.
+
+NEW — Block-place protection:
+- Non-owners cannot place blocks inside a confirmed claim (BlockPlaceEvent, HIGH priority).
+- Action bar: "You cannot place blocks inside this claim."
+
+NEW — Overlap prevention:
+- Setup confirm ("Confirm Purchase") now checks if the new region overlaps any existing
+  claim in the same world before allowing purchase.
+- If overlap detected: error message shown, GUI closes, session REMAINS ACTIVE for
+  the player to adjust their selection.
+- Config message: messages.claim-overlap
+
+NEW — Setup guard for already-claimed chests:
+- Sneak + right-clicking a chest that is already a claim anchor no longer starts a
+  new session. The chest behaves normally (opens as chest or shows non-owner message).
+
+NEW — /claims reload (admin-only):
+- Permission: chestclaims.admin (default: op)
+- Reloads config.yml at runtime without server restart.
+- Non-admins see: "You do not have permission to use this command."
+
+CHANGED — /claims command:
+- Usage updated: /claims cancel | /claims reload
+- Tab-complete shows "reload" only to players with chestclaims.admin permission.
+
+NEW — config keys:
+- messages.not-owner       placeholder: {owner}
+- messages.claim-overlap
+- messages.claim-deleted
+
+NEW — plugin.yml:
+- permissions.chestclaims.admin (default: op)
+
+
+v1.0.2 — 2026-06-08
+---------------------
+Design polish and validation improvements.
+
+CHANGED — Action bar:
+- Reduced to bare minimum: "Blocks: {vol} | Price: {cost} Bops"
+- Examples:  Blocks: 1,250 | Price: 125.00 Bops
+             Blocks: 52,000 | Price: 5,200.00 Bops
+- No dimensions, no coordinates, no extra text.
+
+NEW — Anchor-inside validation:
+- A claim can only be purchased if the anchor chest is located inside the
+  selected cuboid.
+- Validation runs when the player clicks "Confirm Purchase" in the GUI.
+- If the chest is outside the region: error message, GUI closes, session
+  remains active so the player can adjust their selection.
+- Config message: messages.anchor-outside
+  Default: "&cThe claim chest must be inside the selected region."
+
+CHANGED — Selection outline (corner markers):
+- Added 8 larger-size DUST particles at the cuboid corners.
+  Corner particle size = min(4.0, edge_size × 2.0).
+  Corners are immediately distinguishable from edge particles, helping
+  players identify exactly what space they are purchasing.
+- Edge particles unchanged.
+- No additional config required; corner size derives from particle-size.
+
+CHANGED — OutlineTask design (extensibility):
+- OutlineTask now accepts pos1/pos2 as Supplier<Location> instead of a
+  direct ClaimSession reference.
+  Session usage:  session::getPos1, session::getPos2
+  Future borders: claimData::getPos1, claimData::getPos2
+- This makes the task reusable for a future claim-border visibility system
+  without any changes to the task itself.
+
+CHANGED — Confirmation GUI:
+- "CONFIRM" button renamed to "Confirm Purchase".
+- "CANCEL" button renamed to "Cancel".
+- Info item (Claim Summary) now shows only Blocks and Price — dimensions removed.
+- All item labels/lore simplified; bold removed from buttons.
+
+NEW — config key:
+- messages.anchor-outside
+
+
+v1.0.1 — 2026-06-08
+---------------------
+Phase 1 flow improvements.
+
+CHANGED — Hologram:
+- Single-line hologram replaced with 3-line multi-line TextDisplay.
+- Default text:
+    Line 1: "&6&lClaim Setup"
+    Line 2: "&7Select your area with shears"
+    Line 3: "&eRight-click the chest again to confirm"
+- All three lines configurable via hologram.line1/line2/line3 in config.yml.
+
+NEW — Selection outline:
+- Particle outline drawn around the selected cuboid during setup.
+- Uses DUST particles (orange by default) on the 12 edges of the bounding box.
+- Only sent to the player making the claim (not visible to others).
+- Refreshes every update-ticks ticks (default 10 = 0.5 s).
+- When only pos1 is set: single marker dot shown above the selected block.
+- Config section: selection-outline (enabled, update-ticks,
+  max-particles-per-edge, particle-color, particle-size).
+- Outline is removed when the session ends (confirm, cancel, or logout).
+
+CHANGED — Action bar:
+- Removed dimension display (WxHxD) from action bar.
+- Now shows: "Claim: {vol} blocks | Cost: {cost} Bops" (with comma-formatted volume).
+- Example: "Claim: 1,250 blocks | Cost: 1250.00 Bops"
+
+CHANGED — Confirm flow:
+- Removed /claims confirm command.
+- New flow: player right-clicks the same anchor chest after setting both positions
+  to open a GUI.
+- If only one position is set and player right-clicks the anchor chest, it sets
+  pos2 to the anchor chest normally.
+
+NEW — Confirmation GUI:
+- 3-row inventory titled "Confirm Claim".
+- Slot 10: LIME glass pane (CONFIRM) — shows volume and cost in lore.
+- Slot 13: CHEST item (Claim Summary) — shows dimensions, volume, cost.
+- Slot 16: RED glass pane (CANCEL) — cancels setup.
+- Rest filled with GRAY glass panes.
+- Clicking CONFIRM: validates volume, checks Bops, charges, saves claim, ends session.
+- Clicking CANCEL: cancels session (same as /claims cancel).
+- Pressing Escape without clicking: GUI closes, session remains active.
+
+CHANGED — /claims command:
+- Removed "confirm" subcommand. Only "cancel" remains.
+- Tab-complete returns only "cancel".
+- Usage updated to "/claims cancel".
+
+
+v1.0.0 — 2026-06-08
+---------------------
+Phase 1: Shears claim creation foundation.
+
+NEW:
+- Claim setup flow triggered by shift-right-clicking a Chest, Trapped Chest,
+  or Barrel with Shears in main hand.
+- TextDisplay hologram spawns above the anchor chest during setup.
+- Shears act as a 3D selection wand during setup:
+    Left-click  = set Pos1
+    Right-click = set Pos2
+- Selection is a 3D cuboid (width x height x depth).
+  All blocks including air are counted for volume.
+- Action bar feedback after each position set.
+- Cancel setup via: Sneak + Swap Hand (F key), or /claims cancel
+- Confirm setup via: /claims confirm
+- Confirmed claims stored in YAML with:
+    owner-uuid, owner-name, world, anchor, pos1, pos2,
+    created-at (epoch ms), volume, cost.
+- Basic block-break protection: non-owners cannot break blocks inside a
+  confirmed claim. Owner can break normally.
+- BopsHook / BopsIntegration isolation.
+- config.yml: price-per-block, max-volume, all chat messages, hologram text.

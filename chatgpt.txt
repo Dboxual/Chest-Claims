@@ -1,0 +1,809 @@
+ChestClaims — Plugin Context Document
+======================================
+Last updated: 2026-06-12
+Current version: 1.0.20 (Chunk Claim — new claim type, full chunk column, GUI-driven)
+
+LATEST SESSION — 2026-06-12 (v1.0.20)
+--------------------------------------
+
+Version bumped: 1.0.19 → 1.0.20
+
+New feature: Chunk Claim
+  Sneak + right-click an unclaimed chest with shears now opens "Choose Claim Type"
+  GUI (27 slots). Slot 11 = Custom Claim (existing flow). Slot 15 = Chunk Claim.
+
+  Chunk Claim flow:
+    - Click "Chunk Claim" → auto-compute chunk bounds from anchor chest's chunk
+    - Green (0,255,128) particle preview of chunk perimeter shown immediately
+    - Hologram: "Chunk Claim / Your chunk is highlighted / Right-click to confirm"
+    - Confirm GUI shows Cost: 15 Bops, Upkeep: 2 Bops/day
+    - Bops charged only on confirmation
+    - Overlap check and insufficient-Bops check apply normally
+    - Volume check skipped (chunk columns always exceed custom max-volume)
+    - chunk-claim=true persisted in claims.yml
+
+  Protection: uses same ACTIVE/INACTIVE + midnight upkeep as custom claims.
+  Flat daily upkeep (chunk-claims.upkeep-bops-per-day) stored as dailyUpkeepCost.
+
+New config.yml sections:
+  chunk-claims.enabled: true
+  chunk-claims.claim-cost-bops: 15
+  chunk-claims.upkeep-bops-per-day: 2
+  chunk-claims.preview-particle-color: "0,255,128"
+  chunk-hologram.line1/line2/line3
+
+New files:
+  ClaimTypeHolder.java    — InventoryHolder for type selector
+  ClaimTypeSelectGUI.java — "Choose Claim Type" GUI
+
+Files changed:
+  build.gradle.kts        — version bumped to 1.0.20
+  config.yml              — chunk-claims + chunk-hologram sections added
+  ClaimSession.java       — ClaimType enum (CUSTOM, CHUNK) + field
+  ClaimData.java          — chunkClaim boolean field
+  ClaimStorage.java       — persist/load chunk-claim flag
+  ClaimSetupListener.java — ClaimTypeSelectGUI on interaction; startCustomSession();
+                            startChunkClaimSession(); startChunkOutline()
+  GUIListener.java        — ClaimTypeHolder handler; chunk-aware executeConfirm
+  ClaimConfirmGUI.java    — chunk-aware pricing; BLUE_CONCRETE info item for chunks
+  ClaimManageGUI.java     — "Type: Chunk Claim" row in info item
+  changelog.txt           — v1.0.20 entry
+  chatgpt.txt             — this update
+
+Jar output:
+  build/ChestClaims-1.0.20.jar
+
+PREVIOUS SESSION — 2026-06-12 (v1.0.19)
+--------------------------------------
+
+Version bumped: 1.0.18 → 1.0.19
+
+Economy defaults (as of v1.0.19):
+  claims.price-per-block:                   0.02  (was 1.0)
+  upkeep.daily-cost-percent-of-purchase:    2.0   (was 3.0)
+  claims.max-volume:                        50000 (unchanged)
+
+Representative costs at new rates:
+   500-block claim:  10 Bops purchase,  0.20 Bops/day
+  1000-block claim:  20 Bops purchase,  0.40 Bops/day
+  2000-block claim:  40 Bops purchase,  0.80 Bops/day
+  5000-block claim: 100 Bops purchase,  2.00 Bops/day
+
+Files changed:
+  build.gradle.kts        — version bumped to 1.0.19
+  config.yml              — price-per-block 1.0→0.02, daily-cost-percent-of-purchase 3.0→2.0
+  ClaimConfirmGUI.java    — fallback defaults: price-per-block 1.0→0.02, daily-cost-percent 3.0→2.0
+  GUIListener.java        — fallback defaults: price-per-block 1.0→0.02, daily-cost-percent 3.0→2.0
+  ClaimSetupListener.java — fallback default: price-per-block 1.0→0.02
+  ClaimStorage.java       — migration fallback default: daily-cost-percent 3.0→2.0
+  changelog.txt           — v1.0.19 entry
+  chatgpt.txt             — this update
+
+Jar output:
+  build/ChestClaims-1.0.19.jar  (after build)
+
+PREVIOUS SESSIONS
+  v1.0.18 — online player select GUI for adding trusted players
+  v1.0.17 — claim access management (trusted players + team access toggle)
+  v1.0.16 — automatic upkeep system (midnight auto-pay, 5-min countdown)
+  v1.0.15 — upkeep cost rebalance 1% → 3% per cycle
+  v1.0.14 — Claim Shop removed, upkeep cost visibility, configurable cycle name, WorldGuard compat
+  v1.0.13 — grace period removal, upkeep simplification, hologram dashboard
+  v1.0.12 — Claim Shop rename, hologram cleanup, resolveOwnerDisplay() stub
+  v1.0.11 — simplified chest icon lore (owner, price, upkeep only)
+  v1.0.10 — GUI redesign, outline toggle, claim shop, upkeep hologram
+  v1.0.9  — claim holograms, setup sounds
+
+
+MANAGE GUI LAYOUT (3 rows, 27 slots) — current as of v1.0.18
+--------------------------------------------------------------
+Title: "Claim Management" (dark aqua)
+
+Slot 11: LIME_DYE / GRAY_DYE — "Claim Outline: ON" / "Claim Outline: OFF"
+         Clicking toggles the claim boundary outline for nearby players.
+
+Slot 13: CHEST — "Your Claim" (gold) — centered
+         Lore:
+           Owner:      <name>                    (white)
+           Price Paid: <cost, comma-formatted> Bops  (yellow)
+           Upkeep:     <N> Bops / <cycle-name>   (yellow)
+                    OR "Disabled"                (gray)
+
+Slot 15: NAME_TAG — "Claim Access" (light purple)
+         Lore: "Manage trusted players and team access for this claim." + "Click to manage."
+         Clicking opens the Claim Access GUI.
+
+All other slots: empty (Bedrock-friendly, no glass fillers)
+
+
+CLAIM ACCESS GUI LAYOUT (3 rows, 27 slots) — current as of v1.0.18
+-------------------------------------------------------------
+Title: "Claim Access" (light purple)
+
+Row 1 (slots 0–8): PLAYER_HEAD items for each trusted player (up to 9)
+  - Display name: player's name (white)
+  - Lore: "Trusted player" (green) / "Click to remove trust." (red)
+  - Clicking any head removes that player from the trusted list and refreshes the GUI.
+  - If no trusted players: slots 0–8 are empty.
+
+Slot 11: Team Access toggle
+  - BetterTeams NOT installed: BARRIER — "Team Access" (gray) / "BetterTeams is not installed."
+  - BetterTeams installed, OFF: GRAY_DYE — "Team Access: OFF" / "Click to enable."
+  - BetterTeams installed, ON:  LIME_DYE — "Team Access: ON"  / "Click to disable."
+  - Clicking LIME_DYE or GRAY_DYE (when BetterTeams is installed) toggles and saves.
+
+Slot 13: NAME_TAG — "Add Trusted Player" (aqua)
+  - Lore: "Trusted players can build, break, and interact inside this claim."
+  - Clicking opens the "Select Player" GUI.
+  - If the claim already has 9 trusted players, sends max-trusted message and stays in Access GUI.
+
+Slot 22: ARROW — "Back" (gray)
+  - Returns to main Claim Management GUI.
+
+Owner-only: non-owners cannot open or interact with this GUI.
+
+SELECT PLAYER GUI LAYOUT (6 rows, 54 slots) — new in v1.0.18
+-------------------------------------------------------------
+Title: "Select Player" (aqua)
+
+Slots 0–44: eligible online players as PLAYER_HEAD items
+  - Display name: player's current online name (white)
+  - Lore: "Click to trust this player." (yellow)
+  - Uses the online player's owning-player head/skin where available.
+  - Excludes the claim owner.
+  - Excludes players already trusted on the claim.
+  - Clicking a head adds that player's UUID to trusted-players, saves, sends success chat,
+    and returns to Claim Access.
+
+Slot 22: PAPER — "No Players Available" only when no eligible online players exist.
+
+Slot 45: ARROW — "Previous Page" when a previous page exists.
+Slot 49: ARROW — "Back" returns to Claim Access.
+Slot 53: ARROW — "Next Page" when another page exists.
+
+Owner-only: non-owners cannot use this GUI. Trust remains online-player-only.
+
+
+ACCESS RULES (v1.0.18)
+----------------------
+Owner:
+  - Can always build/break/interact inside the claim.
+  - Can always open the Claim Management GUI and Claim Access GUI.
+  - Can always delete the claim (break anchor → delete GUI).
+
+Trusted players (ACTIVE claim only):
+  - Can build, break, and interact inside the claim.
+  - Can open the anchor chest as a regular container.
+  - Cannot delete the claim (breaking anchor shows "cannot break this claim's anchor chest").
+  - Cannot open Claim Management GUI or Claim Access GUI.
+  - Cannot toggle outline, edit trust settings, or change team access.
+
+Team members (BetterTeams installed, team-access-enabled = true, ACTIVE claim only):
+  - Same build/break/interact access as trusted players.
+  - Same restrictions as trusted players.
+
+Other non-owners (ACTIVE claim):
+  - Blocked from break/place. Action-bar message shown.
+  - Blocked from opening the anchor chest; action-bar "This claim belongs to <owner>."
+
+INACTIVE claims:
+  - No protection for anyone. All block events proceed normally.
+  - Non-owners can open the anchor chest.
+
+
+BETTERTEAMS INTEGRATION (v1.0.17)
+-----------------------------------
+Soft dependency — no BetterTeams jar required at compile time.
+
+If BetterTeams is installed:
+  - TeamsHook.init() detects it at startup. Logs "BetterTeams integration active."
+  - TeamsIntegration uses reflection: com.booksaw.betterTeams.Team.getTeam(OfflinePlayer)
+    then checks Team.getMembers() (Map<UUID, TeamPlayer>) for the playerUuid.
+  - Team Access toggle in Claim Access GUI shows LIME_DYE / GRAY_DYE.
+  - Toggling saves team-access-enabled per-claim to claims.yml.
+
+If BetterTeams is not installed:
+  - TeamsHook.isAvailable() returns false.
+  - Team Access toggle shows BARRIER "BetterTeams is not installed." — clicking does nothing.
+  - areTeammates() always returns false — no team bypass in protection.
+  - Trusted player system works entirely independently.
+  - No errors thrown.
+
+
+CLAIM CONFIRM GUI LAYOUT (3 rows, 27 slots) — current as of v1.0.14
+---------------------------------------------------------------------
+Title: "Confirm Claim" (dark green)
+
+Slot 10: LIME_CONCRETE "Confirm Purchase"
+         Lore:
+           Claim Price: <cost> Bops              (yellow)
+           Upkeep:      <N> Bops / <cycle-name>  (gold) — only if upkeep.enabled = true
+           [blank line]
+           Click to purchase this claim.         (green)
+
+Slot 13: CHEST "Claim Summary"
+         Lore:
+           Claim Price: <cost> Bops              (yellow)
+           Upkeep:      <N> Bops / <cycle-name>  (gold) — only if upkeep.enabled = true
+
+Slot 16: RED_CONCRETE "Cancel"
+All other slots: empty
+
+Players see their upkeep cost per cycle BEFORE confirming the purchase.
+
+
+HOLOGRAM (v1.0.14 — simplified Active/Inactive status)
+-------------------------------------------------------
+Each confirmed claim has a floating hologram above its anchor chest:
+
+  Line 1: "{owner}'s Claim"   [gold bold, configurable via completed-hologram.line1]
+           {owner} resolved via resolveOwnerDisplay() — currently returns ownerName.
+
+  When upkeep.enabled = true:
+    Line 2: "<N> Bops / <cycle-name>"  [gray — e.g. "50 Bops / Day"]
+    Line 3: "Active"                   [green]
+         OR "Inactive"                 [red — when claim.state == INACTIVE]
+    Line 4: Hint text                  [configurable via completed-hologram.line3]
+
+  When upkeep.enabled = false:
+    Line 2: "Upkeep Disabled"  [gray]
+    Line 3: Hint text          [configurable via completed-hologram.line3]
+
+No time-remaining shown. Status is purely Active or Inactive.
+Cycle name in rate line is read from upkeep.cycle-name config key.
+
+
+WORLDGUARD COMPATIBILITY
+-------------------------
+ChestClaims never overrides a WorldGuard (or any other protection plugin) cancellation.
+
+Implementation:
+- All block and interaction handlers run at EventPriority.HIGHEST with ignoreCancelled = true.
+- WorldGuard uses EventPriority.HIGH, so it always processes and cancels events BEFORE ChestClaims.
+- If an event is cancelled by the time ChestClaims runs, ChestClaims skips it entirely.
+
+Affected handlers and what this means in practice:
+  ClaimSetupListener.onInteract (HIGHEST, ignoreCancelled=true):
+    → WG blocks interaction in a protected region → claim setup does not start, pos1/pos2
+      not set, confirm GUI not opened.
+
+  ClaimInteractListener.onChestInteract (HIGHEST, ignoreCancelled=true):
+    → WG blocks interaction with a claimed chest → manage GUI does not open, even for owner.
+
+  ClaimProtectionListener.onBlockBreak (HIGHEST, ignoreCancelled=true):
+    → WG blocks a break → CC skips entirely. Owner does NOT get the delete GUI.
+      Non-owner is already blocked by WG; CC adds nothing.
+
+  ClaimProtectionListener.onBlockPlace (HIGHEST, ignoreCancelled=true):
+    → WG blocks a place → CC skips entirely.
+
+Key behavior: WorldGuard always wins. ChestClaims only acts on events that WorldGuard
+(and other HIGH-priority plugins) have already allowed to proceed.
+
+No WorldGuard API integration is required — this works purely via event priority ordering.
+
+
+CLAIM OUTLINE TOGGLE SYSTEM
+-----------------------------
+Owner right-clicks anchor → Claim Management GUI → slot 11 (Outline Toggle).
+Clicking toggles claim.outlineEnabled and saves claims.yml immediately.
+
+When outlineEnabled = true:
+  ClaimOutlineTask (server-wide BukkitRunnable, runs every claim-outline.update-ticks ticks)
+  → for each claim with outlineEnabled:
+    → for each online player within claim-outline.view-distance-blocks (horizontal from anchor):
+      → draws DUST particle outline (12 edges + 8 corner markers) around the claim
+  Color: cyan (0,200,255) by default.
+  Bedrock-compatible (DUST particles work via Geyser).
+
+
+IN-GAME TEST CHECKLIST (manual — do not run server yourself)
+-------------------------------------------------------------
+
+CLAIM ACCESS GUI — MAIN BUTTON (v1.0.18)
+1.  Right-click a claim anchor chest as owner → "Claim Management" opens (3 items).
+    Slot 11: LIME/GRAY_DYE "Claim Outline"
+    Slot 13: CHEST "Your Claim"
+    Slot 15: NAME_TAG "Claim Access" (light purple)
+    All other slots empty.
+2.  Click slot 15 → "Claim Access" GUI opens (light purple title).
+    Row 1 (slots 0–8): empty (no trusted players yet).
+    Slot 11: GRAY_DYE "Team Access: OFF" (if BetterTeams installed) OR BARRIER (if not).
+    Slot 13: NAME_TAG "Add Trusted Player" (aqua).
+    Slot 22: ARROW "Back" (gray).
+3.  Click Back (slot 22) → returns to "Claim Management" GUI.
+
+TRUST A PLAYER WITH SELECT GUI (v1.0.18)
+4.  Open Claim Access GUI. Click "Add Trusted Player" (slot 13).
+    "Select Player" GUI opens (aqua title).
+5.  Confirm online eligible players appear as PLAYER_HEAD items with their names.
+    The owner should not appear. Already trusted players should not appear.
+6.  Click Back (slot 49) → returns to Claim Access with no trust changes.
+7.  Reopen Select Player and click an online player's head.
+    Chat: "&a<name> is now trusted on this claim."
+    Claim Access reopens. Row 1 slot 0 now shows a PLAYER_HEAD with their name.
+8.  Click "Add Trusted Player" again.
+    The player just trusted should no longer appear in the Select Player GUI.
+9.  If no eligible online players exist, Select Player shows PAPER "No Players Available"
+    and Back still returns to Claim Access.
+10. If more than 45 eligible players are online, verify Next Page / Previous Page arrows work.
+11. Trust up to 9 players. Attempt Add Trusted Player again.
+    Chat: "This claim already has 9 trusted players (max)." Claim Access reopens.
+
+REMOVE A TRUSTED PLAYER (v1.0.18)
+12. With at least one trusted player: open Claim Access GUI.
+    Click their PLAYER_HEAD in row 1 → chat: "&e<name> has been removed from trusted players."
+    Access GUI reopens. Their head is gone.
+
+TRUSTED PLAYER ACCESS (v1.0.18)
+13. Log in as the trusted player. Approach the claim.
+    Right-click the anchor chest → chest opens as a normal container (no GUI, no message).
+14. Break a block inside the ACTIVE claim as the trusted player → allowed (no cancellation).
+15. Place a block inside the ACTIVE claim as the trusted player → allowed.
+16. As the trusted player, try to break the anchor chest.
+    Action bar: "You cannot break this claim's anchor chest." Block not broken.
+17. Verify the trusted player cannot open the "Claim Management" GUI.
+    (They open the chest contents instead — not the management screen.)
+
+TEAM ACCESS TOGGLE (v1.0.18) — requires BetterTeams installed
+18. With BetterTeams installed, open Claim Access GUI.
+    Slot 11: GRAY_DYE "Team Access: OFF"
+    Click it → LIME_DYE "Team Access: ON". GUI refreshes.
+    Click again → GRAY_DYE "Team Access: OFF". GUI refreshes. Persists on reload.
+19. With team access ON: a BetterTeams teammate (not in the trusted list) can
+    break/place/interact inside the ACTIVE claim.
+20. With team access OFF: the same teammate is blocked (action-bar message).
+21. Non-teammate is always blocked regardless of team access toggle.
+
+TEAM ACCESS — BETTERTEAMS NOT INSTALLED (v1.0.18)
+22. With BetterTeams absent: slot 11 shows BARRIER "Team Access" with lore:
+    "BetterTeams is not installed."
+    Clicking BARRIER does nothing (no toggle, no error).
+
+PROTECTION REGRESSION (v1.0.18)
+23. Non-trusted non-owner + ACTIVE claim → blocked from break/place. Action-bar message.
+24. Non-trusted non-owner + ACTIVE claim → right-click anchor → "This claim belongs to <owner>."
+25. Any non-owner + INACTIVE claim → break/place/anchor interact all allowed.
+26. Owner breaks anchor → "Delete Claim?" GUI (unchanged).
+27. Owner right-clicks anchor → "Claim Management" GUI (unchanged).
+
+PERSISTENCE (v1.0.18)
+28. Trust a player, reload server (or /claims reload for config only).
+    Re-open Claim Access GUI → trusted player still listed.
+29. Toggle team access ON, reload server.
+    Re-open Claim Access GUI → Team Access still ON.
+
+CLAIM SHOP REMOVED (v1.0.14)
+1.  Right-click claim anchor chest → "Claim Management" opens.
+    GUI has ONLY slot 11 (outline toggle) and slot 13 (chest info).
+    No NETHER_STAR "Claim Shop" button at slot 15. No shop anywhere.
+2.  No shop GUI exists. Clicking any empty slot does nothing.
+
+CLAIM MANAGEMENT GUI
+3.  Slot 11: GRAY_DYE "Claim Outline: OFF" (if outline disabled).
+    Slot 13: CHEST "Your Claim" — lore shows:
+      Owner: <player name>
+      Price Paid: <cost, comma-formatted> Bops
+      Upkeep: <N> Bops / Day  (yellow — with upkeep.enabled: true)
+4.  upkeep.enabled: false → "Upkeep: Disabled" (gray) in slot 13 lore.
+5.  Verify no "Blocks", "Size", "Created", or "Anchor" lines appear in slot 13 lore.
+
+CLAIM CONFIRM GUI (before purchase)
+6.  Start claim setup (shears + sneak+right-click chest), set Pos1, Pos2, right-click anchor.
+    Confirm GUI opens. Slot 10 and slot 13 lore both show:
+      Claim Price: <cost> Bops
+      Upkeep: <N> Bops / Day
+7.  upkeep.enabled: false → Upkeep line NOT shown in confirm GUI lore.
+8.  Cost numbers are comma-formatted (e.g. "5,000 Bops" not "5000.00 Bops").
+
+HOLOGRAM
+9.  Approach claim within 5 blocks → hologram appears.
+    upkeep.enabled: true, ACTIVE:
+      Line 1: "[owner]'s Claim" (gold bold)
+      Line 2: "<N> Bops / Day" (gray)
+      Line 3: "Active" (green)
+      Line 4: "Right-click chest to manage" (gray)
+10. INACTIVE claim:
+      Line 3: "Inactive" (red)
+11. upkeep.enabled: false:
+      Line 2: "Upkeep Disabled" (gray) — only 3 lines total.
+12. No time-remaining text (e.g. "6 Days Remaining") appears anywhere in the hologram.
+
+CYCLE NAME
+13. Change upkeep.cycle-name from "Day" to "Hour" in config.yml.
+    Reload server (or /claims reload).
+    Manage GUI slot 13 lore: "Upkeep: 50 Bops / Hour"
+    Hologram rate line: "50 Bops / Hour"
+    Confirm GUI: "Upkeep: 50 Bops / Hour"
+
+OUTLINE TOGGLE
+14. Slot 11 GRAY_DYE (OFF) → click → LIME_DYE (ON). Nearby players see cyan outline.
+15. Slot 11 LIME_DYE (ON) → click → GRAY_DYE (OFF). Outline stops within 1 s.
+16. Outline state survives server restart.
+
+DELETE FLOW (unchanged)
+17. Break anchor chest → "Delete Claim?" GUI (slots 10/13/16).
+18. "Yes" → deleted, chest drops. "No" → closes, claim intact.
+
+AUTOMATIC UPKEEP — USE /claims cycle TO TEST WITHOUT WAITING FOR MIDNIGHT
+19. FULL PAY: Create a claim. Ensure your balance ≥ dailyUpkeepCost.
+    Run /claims cycle.
+    Verify: Bops deducted (amount = dailyUpkeepCost). Claim stays ACTIVE.
+    Hologram still shows "Active" (green).
+
+20. ONLINE FAILURE — PAYMENT DUE COUNTDOWN:
+    a. Create a claim. Drop your Bops so balance < dailyUpkeepCost.
+    b. Run /claims cycle.
+    c. Receive chat message: "Your claim requires N Bops for upkeep.
+       You have 5 minutes to obtain enough Bops or protection will end."
+    d. Hologram now shows "Payment Due" (yellow, line 3).
+    e. Obtain enough Bops within 5 minutes (from another player or creative mode).
+    f. Within 5 seconds: Bops deducted automatically. Chat: "Upkeep paid!"
+    g. Hologram returns to "Active" (green).
+
+21. ONLINE FAILURE — COUNTDOWN EXPIRY:
+    a. Set up as in test 20 but do NOT obtain Bops.
+    b. Wait 5 minutes (or reduce COUNTDOWN_TOTAL_CHECKS in UpkeepManager for faster test).
+    c. Chat message: "Your claim has lost protection due to unpaid upkeep."
+    d. Hologram shows "Inactive" (red).
+    e. Non-owner can now break blocks inside the claim.
+
+22. ONLINE FAILURE — PLAYER GOES OFFLINE DURING COUNTDOWN:
+    a. Start countdown (test 20 steps a–d).
+    b. Log off immediately.
+    c. Server console should log: "Claim <id> → INACTIVE (owner went offline during countdown)."
+    d. Log back in. Hologram shows "Inactive" (red).
+
+23. OFFLINE FAILURE:
+    a. Create a claim. Drain your balance.
+    b. Log off.
+    c. Run /claims cycle from console (or wait for midnight).
+    d. Server log: "Claim <id> → INACTIVE (owner offline, insufficient balance)."
+    e. Log in. Hologram shows "Inactive" (red). No Bops deducted.
+
+24. MOST EXPENSIVE FIRST:
+    a. Create 3 claims: cheap (e.g. 50/day), medium (150/day), expensive (300/day).
+    b. Set balance to 200 (enough for cheap + medium but not expensive).
+    c. Run /claims cycle.
+    d. Expected: expensive claim → Payment Due (or INACTIVE if offline). Cheap + medium paid.
+    e. Verify 200 Bops withdrawn (cheap + medium costs). Expensive claim in payment-due state.
+
+25. FIRST DAY FREE:
+    a. Create a claim and immediately run /claims cycle.
+    b. Claim should NOT be charged (created after today's midnight).
+    c. Balance unchanged.
+
+26. DELETE DURING COUNTDOWN:
+    a. Start a countdown (test 20 steps a–d).
+    b. While claim is in "Payment Due" state, break the anchor chest and confirm deletion.
+    c. Claim deleted normally. No errors in console. No further countdown messages.
+
+27. MULTIPLE CLAIMS — ALL AFFORDABLE:
+    a. Create 3 claims with known upkeep costs.
+    b. Set balance to (sum of all 3 costs).
+    c. Run /claims cycle.
+    d. All 3 claims paid. Single Bops withdrawal = total cost. All ACTIVE.
+
+WORLDGUARD COMPATIBILITY
+28. Create a WorldGuard region with build: deny and chest-access: deny.
+    Non-owner tries to break a block inside a ChestClaims + WG overlap → blocked (WG wins).
+    Owner tries to break their anchor chest inside WG deny region → block break is cancelled
+    by WG; delete GUI does NOT open. ChestClaims does not interfere.
+29. Owner right-clicks their claimed chest inside WG deny region → interaction cancelled by WG;
+    Claim Management GUI does NOT open. ChestClaims does not override.
+30. Player tries to start claim setup (shears sneak+right-click) on a chest inside WG deny →
+    interaction cancelled by WG; session does NOT start.
+31. Inside a WG region with build: deny, non-owner places a block → WG blocks it; ChestClaims
+    does not add an extra "cannot place blocks" message (WG's message only).
+32. Outside any WG region (or in a WG region with build: allow) → normal ChestClaims behavior
+    applies: owners can manage/delete, non-owners are blocked by ChestClaims protection.
+
+REGRESSION
+33. Non-owner right-clicks claim (no WG) → action bar message, no GUI.
+34. Non-owner breaks block inside ACTIVE claim (no WG) → blocked.
+35. Non-owner breaks block inside INACTIVE claim → allowed.
+36. /claims reload → config reloads; holograms, outline state intact.
+37. New claim purchased → hologram appears with correct owner + rate + Active.
+38. Shears border preview unaffected.
+39. upkeep.enabled: false → /claims cycle does nothing; no deductions.
+
+
+IMPORTANT: Normal claim gameplay is commandless. Players manage claims entirely
+through right-clicking chest blocks. Slash commands exist only for admin/debug use.
+
+
+OVERVIEW
+--------
+ChestClaims is a Paper 1.21.1 Minecraft plugin for creating and managing
+land claims anchored to chests. Players use Shears as a FAWE-style 3D
+selection wand to define a cuboid claim area. Claims cost Bops (currency
+from the companion Bops plugin) per block of total volume, including air.
+
+Claims have an upkeep system: a daily cost (configurable as a % of purchase
+price per upkeep cycle, default 3%). Upkeep is processed automatically at
+midnight — Bops are withdrawn from the owner's balance without any manual action.
+If payment fails, online owners get a 5-minute countdown; offline owners lose
+protection immediately. INACTIVE claims have no block protection but are not
+auto-deleted.
+
+Access management (v1.0.18): owners can trust currently online players through
+the Select Player GUI and toggle BetterTeams teammate access per-claim from the
+Claim Access GUI.
+
+
+FILE STRUCTURE
+--------------
+ChestClaims/
+  build.gradle.kts
+  settings.gradle.kts
+  src/main/java/com/chestclaims/
+    ChestClaimsPlugin.java            Plugin entry point
+    SoundUtil.java                    Sound helper
+    ClaimHologramManager.java         Per-claim TextDisplay holograms with proximity show/hide
+    bops/
+      BopsHook.java                   Public Bops bridge (safe when Bops absent)
+      BopsIntegration.java            Holds Bops API calls; only loaded when Bops present
+    teams/
+      TeamsHook.java                  BetterTeams soft-dependency bridge (safe when absent)
+      TeamsIntegration.java           Reflective BetterTeams API calls; only instantiated when present
+    claim/
+      ClaimSession.java               Setup state (anchor, pos1, pos2, containsAnchor())
+      ClaimData.java                  Confirmed claim POJO — upkeep + outline + trust + teamAccess fields
+      ClaimState.java                 Enum: ACTIVE, INACTIVE
+      ClaimStorage.java               YAML persistence (plugins/ChestClaims/claims.yml)
+    upkeep/
+      UpkeepManager.java              Midnight cycle auto-pay; 5-min countdown; ACTIVE→INACTIVE
+    command/
+      ClaimsCommand.java              /claims cancel | /claims reload | /claims cycle (admin)
+    gui/
+      ClaimGuiHolder.java             InventoryHolder for the setup confirm GUI
+      ClaimConfirmGUI.java            Confirm purchase GUI — shows claim price + upkeep per cycle
+      ClaimManageHolder.java          InventoryHolder; Screen enum: MANAGE | DELETE_CONFIRM | ACCESS | SELECT_PLAYER
+      ClaimManageGUI.java             openManage() [outline + info + access], openDeleteConfirm()
+      ClaimAccessGUI.java             Claim access GUI: trusted player list, team toggle, back button
+      TrustedPlayerSelectGUI.java     Online player selector for adding trusted players
+    listener/
+      ClaimSetupListener.java         Session map, wand events, hologram, outline mgmt
+      ClaimProtectionListener.java    Block-break/place protection; trusted/team bypass
+      ClaimInteractListener.java      Right-click anchor → manage GUI or allow trusted/team
+      GUIListener.java                Confirm + manage + delete-confirm + access/select GUI clicks
+      OutlineTask.java                BukkitRunnable — draws cuboid edge+corner particles
+      ClaimBorderListener.java        Equip/unequip shears → start/stop per-player border preview
+      ClaimBorderTask.java            Per-player BukkitRunnable — draws borders for nearby claims
+      ClaimOutlineTask.java           Server-wide BukkitRunnable — owner-toggled outlines
+  src/main/resources/
+    plugin.yml                        soft-depend: Bops, BetterTeams; permissions: chestclaims.admin
+    config.yml
+
+
+CLAIM STATES
+------------
+ACTIVE   — Upkeep is current. Full block protection.
+INACTIVE — Upkeep unpaid and not resolved. No block protection.
+
+Lifecycle: ACTIVE → INACTIVE via midnight cycle when payment fails.
+Payment Due is a runtime-only countdown state (not persisted). ClaimState remains ACTIVE during
+countdown; becomes INACTIVE only if countdown expires or owner goes offline.
+GRACE was removed in v1.0.13. Old GRACE entries in claims.yml load as INACTIVE.
+
+
+AUTOMATIC UPKEEP SYSTEM (v1.0.16)
+-----------------------------------
+Rust-style: claims auto-maintain by withdrawing from the owner's Bops balance at midnight.
+No Claim Bank, no Claim Shop, no manual payment. Fully automatic.
+
+MIDNIGHT CYCLE:
+  - Fires once per day at midnight (server wall-clock time).
+  - On plugin enable: next midnight is calculated and scheduled via runTaskLater.
+  - After the first fire: repeating 24h runTaskTimer keeps subsequent cycles going.
+  - /claims cycle (admin) manually triggers the cycle for testing.
+
+PROCESSING ORDER (most expensive first):
+  For each owner, claims are sorted by dailyUpkeepCost descending.
+  Greedy assignment: if running balance ≥ claim cost → mark as affordable, deduct from running balance.
+  Otherwise → mark as cannot-pay.
+  All affordable claims are charged in one Bops withdrawal.
+  Example: balance=200, claims sorted C=300, B=150, A=50.
+    C: 300 > 200 → cannot pay.
+    B: 150 ≤ 200 → pay. running balance = 50.
+    A:  50 ≤  50 → pay. running balance = 0.
+    Withdrawal: 200 Bops. C → fails.
+
+ONLINE PAYMENT FAILURE (5-minute countdown):
+  If owner is ONLINE and claim cannot be paid:
+    1. Claim added to paymentDueClaims set (runtime only).
+    2. Hologram shows "Payment Due" (yellow).
+    3. Chat message: "Your claim requires N Bops for upkeep.
+                      You have 5 minutes to obtain enough Bops or protection will end."
+    4. Server checks every 5 seconds (via BukkitRunnable) if owner now has enough.
+       - Has enough  → charge, keep ACTIVE, confirm in chat, cancel task.
+       - Goes offline → immediately INACTIVE, save, cancel task.
+       - 5 min expire → INACTIVE, notify in chat, cancel task.
+
+OFFLINE PAYMENT FAILURE (instant):
+  If owner is OFFLINE at midnight and claim cannot be paid:
+  → Claim immediately becomes INACTIVE. No countdown, no warning.
+
+FIRST DAY FREE:
+  Claims created on or after today's midnight are skipped by the current midnight cycle.
+  First upkeep charge is at the NEXT midnight.
+  Example: created Monday 4 PM → first charge Monday→Tuesday midnight.
+
+ANTI-EXPLOIT:
+  The economic deterrent is the purchase cost. Deleting and recreating a claim costs the full
+  block purchase price, which over time far exceeds the upkeep that would be owed.
+  Technical note: claims created after the most recent midnight are skipped in the current cycle;
+  the earliest a re-created claim can be charged again is the following midnight.
+
+upkeepPaidUntil field (claims.yml):
+  - Updated on successful payment (set to next midnight epoch ms).
+  - Serves as an audit log; not used to drive the cycle logic.
+  - Migration: existing claims with upkeepPaidUntil=0 participate in the next midnight cycle normally.
+
+
+SOUNDS
+------
+All sounds are under the `sounds` config section. Each has: enabled, sound, volume, pitch.
+  sounds.setup-started
+  sounds.pos1-set
+  sounds.pos2-set
+  sounds.confirmation-open
+  sounds.claim-confirmed
+  sounds.setup-cancelled
+  sounds.shears-lost-cancelled
+  sounds.invalid-action
+  sounds.upkeep-paid  (config key retained; not triggered — upkeep is now silent/automatic)
+
+SoundUtil.play(plugin, player, key) — reads sounds.<key>.{enabled,sound,volume,pitch}.
+
+
+CLAIM CREATION FLOW (commandless)
+-----------------------------------
+1. Player holds Shears in main hand.
+2. Sneak + right-click an unclaimed Chest / Trapped Chest / Barrel.
+   → Session created. Setup hologram + particle outline task start.
+3. Left-click any block → Pos1.
+4. Right-click any block (not anchor) → Pos2.
+   → Action bar: "Blocks: {vol} | Price: {cost} Bops"
+5. Right-click SAME ANCHOR CHEST with both positions set → Confirm GUI opens:
+     Slot 10: LIME_CONCRETE "Confirm Purchase"
+              Lore: Claim Price / Upkeep per cycle (if upkeep enabled) / Click to purchase
+     Slot 13: CHEST "Claim Summary"
+              Lore: Claim Price / Upkeep per cycle (if upkeep enabled)
+     Slot 16: RED_CONCRETE "Cancel"
+6. Confirm → validates, charges Bops, saves claim, spawns hologram.
+7. Cancel → session cancelled.
+   Sneak+F or /claims cancel also cancels at any time.
+
+dailyUpkeepCost stored on claim at creation = cost × (daily-cost-percent-of-purchase / 100).
+
+
+CLAIM MANAGEMENT FLOW (commandless)
+-------------------------------------
+1. Owner right-clicks their claim anchor chest.
+   → "Claim Management" GUI opens (3 rows, 27 slots).
+   → Slot 11: Outline toggle (LIME_DYE or GRAY_DYE)
+   → Slot 13: CHEST info item (owner, price paid, upkeep cost per cycle)
+2. Click Outline Toggle → toggles outlineEnabled, saves, GUI reopens.
+3. Press Escape → GUI closes. No change.
+
+
+CLAIM DELETION FLOW
+--------------------
+1. Owner BREAKS their claim anchor chest.
+   → Block break cancelled; "Delete Claim?" GUI opens.
+   → Slot 10: RED_CONCRETE "Yes, Delete Claim"
+   → Slot 13: BARRIER "Are you sure?"
+   → Slot 16: LIME_CONCRETE "No, Keep Claim"
+2. "Yes" → claim removed, anchor breaks naturally (drops chest + contents).
+3. "No" → GUI closes, claim intact.
+- No Bops refund. Works in all states.
+
+
+NON-OWNER INTERACTION
+----------------------
+- Non-owner right-clicks claimed chest → action bar: "This claim belongs to <owner>." No GUI.
+- Non-owner breaks/places inside ACTIVE claim → blocked.
+- Non-owner breaks/places inside INACTIVE claim → allowed.
+
+
+PROTECTION SUMMARY (v1.0.18)
+----------------------------
+                              ACTIVE         INACTIVE
+Block-break (owner)           ALLOW          ALLOW
+Block-break (trusted/team*)   ALLOW          ALLOW
+Block-break (other)           BLOCK          ALLOW
+
+Block-place (owner)           ALLOW          ALLOW
+Block-place (trusted/team*)   ALLOW          ALLOW
+Block-place (other)           BLOCK          ALLOW
+
+Anchor right-click (owner)    MANAGE GUI     MANAGE GUI
+Anchor right-click (trusted/team*) ALLOW    ALLOW
+Anchor right-click (other)    BLOCK + msg   ALLOW
+
+Anchor break (owner)          DELETE GUI     DELETE GUI
+Anchor break (trusted/team*)  BLOCK + msg   ALLOW
+Anchor break (other)          BLOCK + msg   ALLOW
+
+* team = BetterTeams teammate of owner AND team-access-enabled = true on this claim
+
+
+CONFIG KEYS (config.yml)
+------------------------
+claims.price-per-block                 double, default 1.0
+claims.max-volume                      long,   default 50000
+
+upkeep.enabled                         bool,   default true
+upkeep.daily-cost-percent-of-purchase  double, default 3.0
+upkeep.cycle-name                      string, default "Day"
+(upkeep.check-interval-minutes removed in v1.0.16 — replaced by midnight cycle)
+
+messages.*  (setup-started, pos1-set, pos2-set, selection-info, anchor-outside, cancelled,
+             confirmed, no-session, volume-exceeded, insufficient-funds, not-owner,
+             claim-overlap, claim-deleted, shears-lost)
+
+hologram.line1 / line2 / line3  (setup hologram)
+
+completed-hologram.enabled             bool,   default true
+completed-hologram.view-distance-blocks double, default 5.0
+completed-hologram.height-offset       double, default 1.35
+completed-hologram.line1               placeholder {owner}
+completed-hologram.line3               plain string (hint line)
+
+selection-outline.enabled / update-ticks / max-particles-per-edge / particle-color / particle-size
+claim-border-preview.enabled / radius-blocks / update-ticks / max-claims-shown
+claim-outline.enabled / view-distance-blocks / update-ticks / particle-color
+
+
+CLAIMS YAML SCHEMA (claims.yml)
+--------------------------------
+claims:
+  <claim-uuid>:
+    owner-uuid, owner-name, world,
+    anchor/pos1/pos2: { x, y, z }
+    created-at, volume, cost
+    state              — "ACTIVE" / "INACTIVE"
+    upkeep-paid-until  — epoch ms (0 = not set; claims with 0 never expire)
+    daily-upkeep-cost  — Bops per cycle = purchaseCost × (daily-cost-percent-of-purchase / 100)
+    outline-enabled    — bool (default false)
+    trusted-players    — list of UUID strings (default: empty list)      [new in v1.0.17]
+    team-access-enabled — bool (default false)                            [new in v1.0.17]
+
+
+MIGRATION
+---------
+Old claims load without upkeep fields → defaults: state=ACTIVE, upkeepPaidUntil=0,
+dailyUpkeepCost=cost×(config%/100), outlineEnabled=false.
+Old state "GRACE" → loads as INACTIVE.
+v1.0.17: claims without trusted-players or team-access-enabled → defaults: empty list, false.
+
+
+COMMANDS
+--------
+/claims cancel    — abort setup session
+/claims reload    — reload config.yml (requires chestclaims.admin)
+/claims cycle     — manually trigger the midnight upkeep cycle (requires chestclaims.admin)
+/claim            — alias for /claims
+
+
+PERMISSIONS
+-----------
+chestclaims.admin   — /claims reload, /claims cycle. Default: op.
+
+
+NOT IN THIS VERSION
+--------------------
+- Offline player UUID lookup for trust (v1: online-only)
+- Team ownership transfer
+- Auto deletion of INACTIVE claims
+- Claim expansion / upgrade GUIs
+- Shared ownership / co-owners
+
+
+BITS INTEGRATION
+----------------
+- Soft-depend. BopsHook.init() detects Bops at runtime.
+- If absent: has() → true, withdraw() → true (claims free), getBalance() → MAX_VALUE.
+- Bops jar: ../../Bits/build/Bops-1.1.2.jar (compileOnly).
+- Uses com.bops.api.BopsAPI for balance checks and withdrawals.

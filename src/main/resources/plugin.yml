@@ -1,0 +1,18 @@
+name: ChestClaims
+version: '${version}'
+main: com.chestclaims.ChestClaimsPlugin
+api-version: '1.21'
+soft-depend:
+  - Bops
+  - BetterTeams
+
+commands:
+  claims:
+    description: Chest claims management
+    usage: /claims cancel | /claims reload | /claims cycle
+    aliases: [claim]
+
+permissions:
+  chestclaims.admin:
+    description: Access to admin commands (/claims reload)
+    default: op

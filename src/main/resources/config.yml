@@ -1,0 +1,150 @@
+claims:
+  # Cost in Bops per block inside the 3D selection (width x height x depth, including air)
+  price-per-block: 0.02
+  # Maximum allowed claim volume in blocks
+  max-volume: 50000
+
+upkeep:
+  # Set to true to enable the upkeep system
+  enabled: true
+  # Upkeep cost as a percentage of the original purchase price per cycle
+  # e.g. 2.0 means a claim that cost 20 Bops costs 0.40 Bops per cycle to maintain
+  daily-cost-percent-of-purchase: 2.0
+  # Display name for the upkeep cycle shown in GUIs and holograms (e.g. Day, Hour, Week, Cycle)
+  cycle-name: "Day"
+
+messages:
+  setup-started: "&aSetup started! Left-click=Pos1, Right-click=Pos2. Sneak+F to cancel."
+  pos1-set: "&aPos1 set at &e{x}, {y}, {z}"
+  pos2-set: "&aPos2 set at &e{x}, {y}, {z}"
+  # Action bar shown when both positions are set. Placeholders: {vol} {cost}
+  selection-info: "&7Blocks: &e{vol} &7| Price: &e{cost} Bops"
+  anchor-outside: "&cThe claim chest must be inside the selected region."
+  cancelled: "&cClaim setup cancelled."
+  confirmed: "&aClaim confirmed! Charged &e{cost} Bops."
+  no-session: "&cYou are not in claim setup mode."
+  volume-exceeded: "&cSelection too large! Max: &e{max} blocks."
+  insufficient-funds: "&cInsufficient Bops. Need &e{cost}, have &e{balance}."
+  not-owner: "&7This claim belongs to &e{owner}&7."
+  claim-overlap: "&cThat area overlaps with an existing claim."
+  claim-deleted: "&aClaim deleted."
+  shears-lost: "&cClaim setup cancelled because you stopped holding shears."
+
+hologram:
+  line1: "&6&lClaim Setup"
+  line2: "&7Select your area with shears"
+  line3: "&eRight-click the chest again to confirm"
+
+chunk-hologram:
+  line1: "&b&lChunk Claim"
+  line2: "&7Your chunk is highlighted"
+  line3: "&eRight-click the chest to confirm"
+
+sounds:
+  setup-started:
+    enabled: true
+    sound: BLOCK_NOTE_BLOCK_PLING
+    volume: 1.0
+    pitch: 1.0
+
+  pos1-set:
+    enabled: true
+    sound: BLOCK_AMETHYST_BLOCK_CHIME
+    volume: 1.0
+    pitch: 1.2
+
+  pos2-set:
+    enabled: true
+    sound: BLOCK_AMETHYST_BLOCK_CHIME
+    volume: 1.0
+    pitch: 1.4
+
+  confirmation-open:
+    enabled: true
+    sound: BLOCK_NOTE_BLOCK_BELL
+    volume: 1.0
+    pitch: 1.2
+
+  claim-confirmed:
+    enabled: true
+    sound: ENTITY_PLAYER_LEVELUP
+    volume: 1.0
+    pitch: 1.0
+
+  setup-cancelled:
+    enabled: true
+    sound: BLOCK_NOTE_BLOCK_BASS
+    volume: 1.0
+    pitch: 0.8
+
+  shears-lost-cancelled:
+    enabled: true
+    sound: BLOCK_NOTE_BLOCK_BASS
+    volume: 1.0
+    pitch: 0.6
+
+  invalid-action:
+    enabled: true
+    sound: ENTITY_VILLAGER_NO
+    volume: 1.0
+    pitch: 1.0
+
+  upkeep-paid:
+    enabled: true
+    sound: ENTITY_EXPERIENCE_ORB_PICKUP
+    volume: 1.0
+    pitch: 1.0
+
+selection-outline:
+  enabled: true
+  # How often to redraw the particle outline (ticks; 10 = every 0.5 s)
+  update-ticks: 10
+  # Maximum particles drawn per edge of the cuboid (12 edges total)
+  max-particles-per-edge: 15
+  # Outline colour as R,G,B (only affects DUST particle type)
+  particle-color: "255,165,0"
+  particle-size: 1.0
+
+completed-hologram:
+  # Show a floating text label above each claim anchor chest
+  enabled: true
+  # Distance (blocks) within which a player sees the hologram
+  view-distance-blocks: 5
+  # Height above the top face of the anchor block
+  height-offset: 1.35
+  # Line 1: claim owner header. Placeholder: {owner}
+  line1: "&6&l{owner}'s Claim"
+  # Line 2: upkeep rate (auto-computed — "N Bops / Day", or "Upkeep Disabled")
+  # Line 3: upkeep state (auto-computed — "Active" or "Inactive")
+  # Line 4: hint text shown below all other lines
+  line3: "&7Right-click chest to manage"
+
+claim-border-preview:
+  # Show particle borders around nearby confirmed claims when holding shears
+  enabled: true
+  # Horizontal radius (blocks) around the player to search for claims
+  radius-blocks: 64
+  # How often to redraw borders (ticks; 20 = every 1 s)
+  update-ticks: 20
+  # Maximum number of nearby claims to show borders for at once
+  max-claims-shown: 8
+
+claim-outline:
+  # Allow owners to toggle a persistent particle outline visible to nearby players
+  enabled: true
+  # Horizontal view distance for the outline (blocks from anchor)
+  view-distance-blocks: 32
+  # How often to redraw the outline (ticks; 20 = every 1 s)
+  update-ticks: 20
+  # Outline colour as R,G,B (cyan by default — distinct from selection/shears orange)
+  particle-color: "0,200,255"
+
+chunk-claims:
+  # Set to false to disable the Chunk Claim option entirely
+  enabled: true
+  # One-time purchase cost in Bops per chunk claim
+  claim-cost-bops: 15
+  # Daily upkeep cost in Bops per chunk claim
+  upkeep-bops-per-day: 2
+  # Particle colour for the chunk preview outline (R,G,B)
+  preview-particle-color: "0,255,128"
