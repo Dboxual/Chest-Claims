@@ -5,7 +5,11 @@ import com.chestclaims.SoundUtil;
 import com.chestclaims.bops.BopsHook;
 import com.chestclaims.claim.ClaimData;
 import com.chestclaims.claim.ClaimSession;
+import com.chestclaims.claim.ClaimState;
 import com.chestclaims.claim.ClaimStorage;
+import com.chestclaims.claim.OutlineColor;
+import com.chestclaims.gui.ChunkAddConfirmGUI;
+import com.chestclaims.gui.ChunkAddConfirmHolder;
 import com.chestclaims.gui.ClaimAccessGUI;
 import com.chestclaims.gui.ClaimConfirmGUI;
 import com.chestclaims.gui.ClaimGuiHolder;
@@ -13,18 +17,23 @@ import com.chestclaims.gui.ClaimManageGUI;
 import com.chestclaims.gui.ClaimManageHolder;
 import com.chestclaims.gui.ClaimTypeHolder;
 import com.chestclaims.gui.ClaimTypeSelectGUI;
+import com.chestclaims.gui.OutlineSettingsGUI;
 import com.chestclaims.gui.TrustedPlayerSelectGUI;
 import com.chestclaims.teams.TeamsHook;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 
+import java.text.NumberFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 public class GUIListener implements Listener {
@@ -32,12 +41,15 @@ public class GUIListener implements Listener {
     private final ChestClaimsPlugin plugin;
     private final ClaimStorage claimStorage;
     private final ClaimSetupListener setupListener;
+    private final ChunkSelectorListener chunkSelectorListener;
 
     public GUIListener(ChestClaimsPlugin plugin, ClaimStorage claimStorage,
-                       ClaimSetupListener setupListener) {
-        this.plugin = plugin;
-        this.claimStorage = claimStorage;
-        this.setupListener = setupListener;
+                       ClaimSetupListener setupListener,
+                       ChunkSelectorListener chunkSelectorListener) {
+        this.plugin                = plugin;
+        this.claimStorage          = claimStorage;
+        this.setupListener         = setupListener;
+        this.chunkSelectorListener = chunkSelectorListener;
     }
 
     @EventHandler
@@ -54,6 +66,9 @@ public class GUIListener implements Listener {
         } else if (holder instanceof ClaimManageHolder mh) {
             event.setCancelled(true);
             handleManageClick(event.getRawSlot(), player, mh);
+        } else if (holder instanceof ChunkAddConfirmHolder cah) {
+            event.setCancelled(true);
+            handleChunkAddConfirmClick(event.getRawSlot(), player, cah);
         }
     }
 
@@ -76,7 +91,7 @@ public class GUIListener implements Listener {
         }
     }
 
-    // ── confirm GUI ────────────────────────────────────────────────────────
+    // ── confirm GUI (initial purchase) ────────────────────────────────────
 
     private void handleConfirmClick(int slot, Player player) {
         if (slot == ClaimConfirmGUI.CONFIRM_SLOT) {
@@ -128,7 +143,7 @@ public class GUIListener implements Listener {
 
         double cost, dailyUpkeepCost;
         if (isChunk) {
-            cost           = plugin.getConfig().getDouble("chunk-claims.claim-cost-bops", 15.0);
+            cost            = plugin.getConfig().getDouble("chunk-claims.claim-cost-bops", 15.0);
             dailyUpkeepCost = plugin.getConfig().getDouble("chunk-claims.upkeep-bops-per-day", 2.0);
         } else {
             double pricePerBlock    = plugin.getConfig().getDouble("claims.price-per-block", 0.02);
@@ -162,7 +177,12 @@ public class GUIListener implements Listener {
                 cost
         );
         claim.setDailyUpkeepCost(dailyUpkeepCost);
-        if (isChunk) claim.setChunkClaim(true);
+        if (isChunk) {
+            claim.setChunkClaim(true);
+            int cx = session.getAnchor().getBlockX() >> 4;
+            int cz = session.getAnchor().getBlockZ() >> 4;
+            claim.addClaimedChunk(cx + "," + cz);
+        }
 
         claimStorage.addClaim(claim);
         claimStorage.save();
@@ -175,7 +195,7 @@ public class GUIListener implements Listener {
         SoundUtil.play(plugin, player, "claim-confirmed");
     }
 
-    // ── manage / delete-confirm / access GUI ──────────────────────────────
+    // ── manage / outline-settings / delete-confirm / access GUI ──────────
 
     private void handleManageClick(int slot, Player player, ClaimManageHolder holder) {
         ClaimData claim = holder.getClaim();
@@ -183,17 +203,29 @@ public class GUIListener implements Listener {
         if (holder.getScreen() == ClaimManageHolder.Screen.MANAGE) {
             if (!claim.getOwnerUuid().equals(player.getUniqueId())) return;
 
-            if (slot == ClaimManageGUI.OUTLINE_TOGGLE_SLOT) {
+            if (slot == ClaimManageGUI.OUTLINE_SETTINGS_SLOT) {
                 player.closeInventory();
-                claim.setOutlineEnabled(!claim.isOutlineEnabled());
-                claimStorage.save();
                 Bukkit.getScheduler().runTask(plugin,
-                        () -> ClaimManageGUI.openManage(player, claim, plugin));
+                        () -> OutlineSettingsGUI.open(player, claim, plugin));
+
+            } else if (slot == ClaimManageGUI.ADD_CHUNK_SLOT
+                    && claim.isChunkClaim()
+                    && claim.getState() == ClaimState.ACTIVE) {
+                player.closeInventory();
+                Bukkit.getScheduler().runTask(plugin,
+                        () -> chunkSelectorListener.startSelection(player, claim));
+
             } else if (slot == ClaimManageGUI.MANAGE_ACCESS_SLOT) {
                 player.closeInventory();
                 Bukkit.getScheduler().runTask(plugin,
                         () -> ClaimAccessGUI.open(player, claim, plugin));
             }
+            return;
+        }
+
+        if (holder.getScreen() == ClaimManageHolder.Screen.OUTLINE_SETTINGS) {
+            if (!claim.getOwnerUuid().equals(player.getUniqueId())) return;
+            handleOutlineSettingsClick(slot, player, claim);
             return;
         }
 
@@ -219,6 +251,138 @@ public class GUIListener implements Listener {
             player.closeInventory();
         }
     }
+
+    private void handleOutlineSettingsClick(int slot, Player player, ClaimData claim) {
+        if (slot == OutlineSettingsGUI.TOGGLE_SLOT) {
+            claim.setOutlineEnabled(!claim.isOutlineEnabled());
+            claimStorage.save();
+            player.closeInventory();
+            Bukkit.getScheduler().runTask(plugin,
+                    () -> OutlineSettingsGUI.open(player, claim, plugin));
+            return;
+        }
+
+        if (slot == OutlineSettingsGUI.BACK_SLOT) {
+            player.closeInventory();
+            Bukkit.getScheduler().runTask(plugin,
+                    () -> ClaimManageGUI.openManage(player, claim, plugin));
+            return;
+        }
+
+        OutlineColor[] colors = OutlineSettingsGUI.COLOR_ORDER;
+        for (int i = 0; i < colors.length; i++) {
+            if (slot == OutlineSettingsGUI.FIRST_COLOR_SLOT + i) {
+                claim.setOutlineColor(colors[i].rgb);
+                claimStorage.save();
+                player.closeInventory();
+                Bukkit.getScheduler().runTask(plugin,
+                        () -> OutlineSettingsGUI.open(player, claim, plugin));
+                return;
+            }
+        }
+    }
+
+    // ── chunk add confirm GUI ──────────────────────────────────────────────
+
+    private void handleChunkAddConfirmClick(int slot, Player player, ChunkAddConfirmHolder holder) {
+        if (slot == ChunkAddConfirmGUI.CONFIRM_SLOT) {
+            player.closeInventory();
+            executeChunkAdd(player, holder.getClaim(), holder.getTargetChunkX(), holder.getTargetChunkZ());
+        } else if (slot == ChunkAddConfirmGUI.CANCEL_SLOT) {
+            player.closeInventory();
+            chunkSelectorListener.removeSelectorItem(player);
+            player.sendMessage(parse(plugin.getConfig().getString(
+                    "messages.chunk-selector-cancelled",
+                    "&cChunk selection cancelled.")));
+        }
+    }
+
+    private void executeChunkAdd(Player player, ClaimData claim, int cx, int cz) {
+        UUID uuid       = player.getUniqueId();
+        String chunkKey = cx + "," + cz;
+
+        if (!claim.getOwnerUuid().equals(uuid)) return;
+
+        if (claim.getClaimedChunks().contains(chunkKey)) {
+            player.sendMessage(parse(plugin.getConfig().getString(
+                    "messages.chunk-already-in-claim",
+                    "&cThat chunk is already part of your claim.")));
+            chunkSelectorListener.removeSelectorItem(player);
+            return;
+        }
+
+        if (!isAdjacentToClaimChunks(claim, cx, cz)) {
+            player.sendMessage(parse(plugin.getConfig().getString(
+                    "messages.chunk-not-adjacent",
+                    "&cThat chunk is not connected to your existing claim.")));
+            chunkSelectorListener.removeSelectorItem(player);
+            return;
+        }
+
+        if (claimStorage.isChunkClaimed(cx, cz, claim.getWorld(), claim.getId())) {
+            player.sendMessage(parse(plugin.getConfig().getString(
+                    "messages.chunk-already-claimed",
+                    "&cThat chunk is already claimed by someone else.")));
+            chunkSelectorListener.removeSelectorItem(player);
+            return;
+        }
+
+        double cost = plugin.getConfig().getDouble("chunk-claims.claim-cost-bops", 15.0);
+        if (!BopsHook.has(uuid, cost)) {
+            double balance = BopsHook.getBalance(uuid);
+            SoundUtil.play(plugin, player, "invalid-action");
+            player.sendMessage(parse(plugin.getConfig().getString("messages.insufficient-funds",
+                            "&cInsufficient Bops. Need &e{cost}, have &e{balance}.")
+                    .replace("{cost}", String.format("%.2f", cost))
+                    .replace("{balance}", String.format("%.2f", balance))));
+            chunkSelectorListener.removeSelectorItem(player);
+            return;
+        }
+
+        BopsHook.withdraw(uuid, cost);
+
+        claim.addClaimedChunk(chunkKey);
+
+        // Expand the bounding box to include the new chunk
+        World world = claim.getAnchor().getWorld();
+        if (world != null) {
+            Location oldP1 = claim.getPos1();
+            Location oldP2 = claim.getPos2();
+            int newMinX = Math.min(oldP1.getBlockX(), cx * 16);
+            int newMinZ = Math.min(oldP1.getBlockZ(), cz * 16);
+            int newMaxX = Math.max(oldP2.getBlockX(), cx * 16 + 15);
+            int newMaxZ = Math.max(oldP2.getBlockZ(), cz * 16 + 15);
+            claim.setPos1(new Location(world, newMinX, oldP1.getBlockY(), newMinZ));
+            claim.setPos2(new Location(world, newMaxX, oldP2.getBlockY(), newMaxZ));
+        }
+
+        // Upkeep scales with chunk count
+        double upkeepPerChunk = plugin.getConfig().getDouble("chunk-claims.upkeep-bops-per-day", 2.0);
+        claim.setDailyUpkeepCost(claim.getClaimedChunks().size() * upkeepPerChunk);
+
+        claimStorage.save();
+        chunkSelectorListener.removeSelectorItem(player);
+
+        String costFmt = NumberFormat.getNumberInstance(Locale.US).format(cost);
+        player.sendMessage(parse(plugin.getConfig().getString("messages.chunk-added",
+                        "&aChunk ({cx}, {cz}) added to your claim! Charged &e{cost} Bops&a.")
+                .replace("{cx}", String.valueOf(cx))
+                .replace("{cz}", String.valueOf(cz))
+                .replace("{cost}", costFmt)));
+        SoundUtil.play(plugin, player, "claim-confirmed");
+    }
+
+    private boolean isAdjacentToClaimChunks(ClaimData claim, int newCx, int newCz) {
+        for (String key : claim.getClaimedChunks()) {
+            String[] parts = key.split(",");
+            int cx = Integer.parseInt(parts[0]);
+            int cz = Integer.parseInt(parts[1]);
+            if (Math.abs(cx - newCx) + Math.abs(cz - newCz) == 1) return true;
+        }
+        return false;
+    }
+
+    // ── access GUI ────────────────────────────────────────────────────────
 
     private void handleAccessClick(int slot, Player player, ClaimData claim) {
         if (slot == ClaimAccessGUI.BACK_SLOT) {
@@ -252,7 +416,6 @@ public class GUIListener implements Listener {
             return;
         }
 
-        // Trusted player head slots (row 1: slots 0-8)
         if (slot >= ClaimAccessGUI.TRUSTED_ROW_START && slot < ClaimAccessGUI.TRUSTED_ROW_START + 9) {
             int index = slot - ClaimAccessGUI.TRUSTED_ROW_START;
             List<UUID> trusted = claim.getTrustedPlayers();

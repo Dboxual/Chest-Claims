@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "com.chestclaims"
-version = "1.0.20"
+version = "1.0.24"
 
 java {
     toolchain {

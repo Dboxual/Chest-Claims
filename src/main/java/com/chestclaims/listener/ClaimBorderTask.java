@@ -7,11 +7,14 @@ import com.chestclaims.claim.ClaimStorage;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Particle;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 class ClaimBorderTask extends BukkitRunnable {
 
@@ -64,8 +67,51 @@ class ClaimBorderTask extends BukkitRunnable {
         }
 
         for (ClaimData claim : nearby) {
+            drawClaimOutline(player, claim, color, size, maxPerEdge);
+        }
+    }
+
+    /**
+     * Draws the outline for a claim.
+     * Chunk claims: horizontal perimeter ring at the player's Y level, outer edges only.
+     * Custom claims: standard 3D cuboid via OutlineTask.
+     */
+    private void drawClaimOutline(Player player, ClaimData claim, Color color, float size, int maxPerEdge) {
+        if (claim.isChunkClaim() && !claim.getClaimedChunks().isEmpty()) {
+            drawChunkPerimeter(player, claim, color, size, maxPerEdge);
+        } else {
             new OutlineTask(player, claim::getPos1, claim::getPos2, color, size, maxPerEdge)
                     .drawOutline();
+        }
+    }
+
+    /**
+     * Draws the outer horizontal perimeter of a chunk claim at the player's current Y + 1.
+     * Internal edges (shared between two claimed chunks) are skipped.
+     */
+    private void drawChunkPerimeter(Player player, ClaimData claim, Color color, float size, int maxPerEdge) {
+        Set<String> chunks = claim.getClaimedChunks();
+        World world = claim.getAnchor().getWorld();
+        if (world == null) return;
+
+        double y = player.getLocation().getBlockY() + 1.0;
+        Particle.DustOptions dust = new Particle.DustOptions(color, size);
+
+        for (String key : chunks) {
+            String[] parts = key.split(",");
+            int cx  = Integer.parseInt(parts[0]);
+            int cz  = Integer.parseInt(parts[1]);
+            double xMin = cx * 16,      xMax = cx * 16 + 16;
+            double zMin = cz * 16,      zMax = cz * 16 + 16;
+
+            if (!chunks.contains(cx + "," + (cz - 1)))
+                OutlineTask.spawnLine(player, world, xMin, y, zMin, xMax, y, zMin, dust, maxPerEdge);
+            if (!chunks.contains(cx + "," + (cz + 1)))
+                OutlineTask.spawnLine(player, world, xMin, y, zMax, xMax, y, zMax, dust, maxPerEdge);
+            if (!chunks.contains((cx - 1) + "," + cz))
+                OutlineTask.spawnLine(player, world, xMin, y, zMin, xMin, y, zMax, dust, maxPerEdge);
+            if (!chunks.contains((cx + 1) + "," + cz))
+                OutlineTask.spawnLine(player, world, xMax, y, zMin, xMax, y, zMax, dust, maxPerEdge);
         }
     }
 

@@ -2,6 +2,7 @@ package com.chestclaims.claim;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -11,6 +12,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -59,19 +61,29 @@ public class ClaimStorage {
                 try {
                     state = ClaimState.valueOf(stateStr);
                 } catch (IllegalArgumentException e) {
-                    // "GRACE" was removed in v1.0.13; those claims had expired upkeep → INACTIVE
                     state = "GRACE".equalsIgnoreCase(stateStr) ? ClaimState.INACTIVE : ClaimState.ACTIVE;
                 }
                 data.setState(state);
                 data.setUpkeepPaidUntil(c.getLong("upkeep-paid-until", 0L));
 
-                // daily-upkeep-cost stored per-claim; compute from config if missing (migration)
                 double storedDailyCost = c.getDouble("daily-upkeep-cost", -1.0);
                 data.setDailyUpkeepCost(storedDailyCost >= 0
                         ? storedDailyCost
                         : cost * (dailyCostPercent / 100.0));
+
                 data.setOutlineEnabled(c.getBoolean("outline-enabled", false));
+                data.setOutlineColor(c.getString("outline-color", OutlineColor.AQUA.rgb));
                 data.setChunkClaim(c.getBoolean("chunk-claim", false));
+
+                // Load claimed chunks; if missing on a chunk claim, derive from pos1 (migration)
+                List<String> rawChunks = c.getStringList("claimed-chunks");
+                LinkedHashSet<String> claimedChunks = new LinkedHashSet<>(rawChunks);
+                if (data.isChunkClaim() && claimedChunks.isEmpty()) {
+                    int cx = pos1.getBlockX() >> 4;
+                    int cz = pos1.getBlockZ() >> 4;
+                    claimedChunks.add(cx + "," + cz);
+                }
+                data.setClaimedChunks(claimedChunks);
 
                 // Access management — default: empty trusted list, team access off
                 List<String> rawTrusted = c.getStringList("trusted-players");
@@ -107,7 +119,9 @@ public class ClaimStorage {
             yaml.set(path + ".upkeep-paid-until", c.getUpkeepPaidUntil());
             yaml.set(path + ".daily-upkeep-cost", c.getDailyUpkeepCost());
             yaml.set(path + ".outline-enabled", c.isOutlineEnabled());
+            yaml.set(path + ".outline-color", c.getOutlineColor());
             yaml.set(path + ".chunk-claim", c.isChunkClaim());
+            yaml.set(path + ".claimed-chunks", new ArrayList<>(c.getClaimedChunks()));
             List<String> trustedUuids = new ArrayList<>();
             for (UUID uuid : c.getTrustedPlayers()) trustedUuids.add(uuid.toString());
             yaml.set(path + ".trusted-players", trustedUuids);
@@ -176,8 +190,59 @@ public class ClaimStorage {
         return false;
     }
 
+    /**
+     * Returns true if the chunk at (chunkX, chunkZ) in the given world is already
+     * claimed by any claim other than excludeClaimId.
+     * Chunk claims are checked per-chunk key; non-chunk claims use a horizontal AABB.
+     */
+    public boolean isChunkClaimed(int chunkX, int chunkZ, String world, UUID excludeClaimId) {
+        String key  = chunkX + "," + chunkZ;
+        int minX    = chunkX * 16;
+        int maxX    = chunkX * 16 + 15;
+        int minZ    = chunkZ * 16;
+        int maxZ    = chunkZ * 16 + 15;
+
+        for (ClaimData c : claims) {
+            if (!c.getWorld().equals(world)) continue;
+            if (c.getId().equals(excludeClaimId)) continue;
+
+            if (c.isChunkClaim()) {
+                if (c.getClaimedChunks().contains(key)) return true;
+            } else {
+                int cMinX = Math.min(c.getPos1().getBlockX(), c.getPos2().getBlockX());
+                int cMaxX = Math.max(c.getPos1().getBlockX(), c.getPos2().getBlockX());
+                int cMinZ = Math.min(c.getPos1().getBlockZ(), c.getPos2().getBlockZ());
+                int cMaxZ = Math.max(c.getPos1().getBlockZ(), c.getPos2().getBlockZ());
+                if (minX <= cMaxX && maxX >= cMinX && minZ <= cMaxZ && maxZ >= cMinZ) return true;
+            }
+        }
+        return false;
+    }
+
     public void removeClaim(UUID id) {
         claims.removeIf(c -> c.getId().equals(id));
+    }
+
+    /**
+     * Scans all loaded claims and removes any whose anchor block is missing or wrong material.
+     * Meant to be called once on startup, before the hologram manager initialises, so no
+     * hologram is ever spawned for an invalid claim.
+     * Returns the list of removed claims so the caller can log them.
+     */
+    public List<ClaimData> removeClaimsWithMissingAnchors() {
+        List<ClaimData> invalid = new ArrayList<>();
+        for (ClaimData claim : new ArrayList<>(claims)) {
+            World world = Bukkit.getWorld(claim.getWorld());
+            if (world == null) continue; // world not loaded — skip; will be caught by outline task at runtime
+            Location anchor = claim.getAnchor();
+            Material mat = world.getBlockAt(anchor).getType();
+            if (mat != Material.CHEST && mat != Material.TRAPPED_CHEST && mat != Material.BARREL) {
+                invalid.add(claim);
+            }
+        }
+        for (ClaimData c : invalid) removeClaim(c.getId());
+        if (!invalid.isEmpty()) save();
+        return invalid;
     }
 
     private Location readLoc(ConfigurationSection s, String worldName) {

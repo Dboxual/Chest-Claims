@@ -1,6 +1,7 @@
 package com.chestclaims;
 
 import com.chestclaims.bops.BopsHook;
+import com.chestclaims.claim.ClaimData;
 import com.chestclaims.claim.ClaimStorage;
 import com.chestclaims.teams.TeamsHook;
 import com.chestclaims.command.ClaimsCommand;
@@ -9,7 +10,9 @@ import com.chestclaims.listener.ClaimOutlineTask;
 import com.chestclaims.listener.ClaimProtectionListener;
 import com.chestclaims.listener.ClaimSetupListener;
 import com.chestclaims.listener.ClaimInteractListener;
+import com.chestclaims.listener.ChunkSelectorListener;
 import com.chestclaims.listener.GUIListener;
+import com.chestclaims.listener.PluginItemProtectionListener;
 import com.chestclaims.upkeep.UpkeepManager;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -30,6 +33,20 @@ public class ChestClaimsPlugin extends JavaPlugin {
         claimStorage = new ClaimStorage(this);
         claimStorage.load();
 
+        // Scan for claims whose anchor block no longer exists and remove them before
+        // the hologram manager spawns holograms or the outline task starts drawing.
+        java.util.List<ClaimData> orphaned = claimStorage.removeClaimsWithMissingAnchors();
+        for (ClaimData c : orphaned) {
+            getLogger().warning("Startup: removed orphaned claim " + c.getId()
+                    + " owned by " + c.getOwnerName()
+                    + " — anchor block missing at "
+                    + c.getAnchor().getBlockX() + "," + c.getAnchor().getBlockY() + "," + c.getAnchor().getBlockZ()
+                    + " in world '" + c.getWorld() + "'.");
+        }
+        if (!orphaned.isEmpty()) {
+            getLogger().info("Startup: removed " + orphaned.size() + " invalid claim(s) with missing anchor blocks.");
+        }
+
         upkeepManager = new UpkeepManager(this, claimStorage);
 
         hologramManager = new ClaimHologramManager(this, claimStorage);
@@ -39,11 +56,18 @@ public class ChestClaimsPlugin extends JavaPlugin {
         TeamsHook.init(this);
 
         setupListener = new ClaimSetupListener(this, claimStorage);
+        ChunkSelectorListener chunkSelectorListener = new ChunkSelectorListener(this, claimStorage);
+
         getServer().getPluginManager().registerEvents(setupListener, this);
         getServer().getPluginManager().registerEvents(new ClaimProtectionListener(this, claimStorage), this);
-        getServer().getPluginManager().registerEvents(new GUIListener(this, claimStorage, setupListener), this);
-        getServer().getPluginManager().registerEvents(new ClaimInteractListener(this, claimStorage, setupListener), this);
-        getServer().getPluginManager().registerEvents(new ClaimBorderListener(this, claimStorage, setupListener), this);
+        getServer().getPluginManager().registerEvents(
+                new GUIListener(this, claimStorage, setupListener, chunkSelectorListener), this);
+        getServer().getPluginManager().registerEvents(
+                new ClaimInteractListener(this, claimStorage, setupListener), this);
+        getServer().getPluginManager().registerEvents(
+                new ClaimBorderListener(this, claimStorage, setupListener), this);
+        getServer().getPluginManager().registerEvents(chunkSelectorListener, this);
+        getServer().getPluginManager().registerEvents(new PluginItemProtectionListener(this), this);
 
         // Cancel setup sessions whose player stops holding shears (fallback for inventory manipulation)
         new BukkitRunnable() {

@@ -10,7 +10,7 @@ import java.util.UUID;
 
 public class ClaimManageHolder implements InventoryHolder {
 
-    public enum Screen { MANAGE, DELETE_CONFIRM, ACCESS, SELECT_PLAYER }
+    public enum Screen { MANAGE, DELETE_CONFIRM, ACCESS, SELECT_PLAYER, OUTLINE_SETTINGS }
 
     private final ClaimData claim;
     private final Screen screen;

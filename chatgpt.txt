@@ -1,7 +1,707 @@
 ChestClaims — Plugin Context Document
 ======================================
-Last updated: 2026-06-12
-Current version: 1.0.20 (Chunk Claim — new claim type, full chunk column, GUI-driven)
+Last updated: 2026-06-16
+Current version: 1.0.24 (Plugin item protection — Chunk Selector locked to plugin use only)
+
+LATEST SESSION — 2026-06-16 (v1.0.24)
+--------------------------------------
+
+Version bumped: 1.0.23 → 1.0.24
+
+BUG FIXED
+  The Chunk Selector (NETHER_STAR given during the Add Chunk flow) could be used
+  as a normal item: placed in crafting grids to produce recipes (e.g. a beacon),
+  moved into chests/barrels/furnaces/hoppers, or transported by automated systems.
+
+ROOT CAUSE
+  ChunkSelectorListener only protected the item from being dropped (PlayerDropItemEvent)
+  and removed it on logout (PlayerQuitEvent). No protection existed against inventory
+  interactions outside the plugin's own chunk-selection flow.
+
+FIX SUMMARY
+  All ChestClaims plugin-utility items now carry a second PDC tag:
+    key:  chestclaims:plugin-item  (namespace: chestclaims, key: plugin-item)
+    type: BYTE, value: 1
+  This tag is applied by ChunkSelectorListener.buildSelectorItem() at item-creation time.
+  A new listener, PluginItemProtectionListener, blocks all non-intended use by checking
+  this tag rather than display names.
+
+NEW FILE — PluginItemProtectionListener.java
+  Handles four events:
+
+  1. InventoryClickEvent (HIGH priority, ignoreCancelled = false)
+     Detects when the cursor item OR the slot's current item is a plugin item.
+     • Top inventory type == PLAYER → allowed (player freely rearranges own inv).
+     • Top inventory type == CRAFTING (2×2 survival screen):
+         – Click lands in the crafting grid (top inv) → cancelled.
+         – Shift-click (would send item to crafting area)  → cancelled.
+         – Other clicks within player inv area             → allowed.
+     • All other top inventory types (CHEST, BARREL, FURNACE, BLAST_FURNACE,
+       SMOKER, HOPPER, DROPPER, DISPENSER, BREWING, WORKBENCH, ANVIL, GRINDSTONE,
+       SMITHING, LOOM, CARTOGRAPHY, STONECUTTER, ENDER_CHEST, SHULKER_BOX, BEACON,
+       ENCHANTING, and any future type) → event cancelled unconditionally.
+
+  2. InventoryDragEvent (HIGH priority, ignoreCancelled = false)
+     If the old cursor (dragged item) is a plugin item and any inventory other than
+     PLAYER is open → cancelled. Prevents dragging the item into any non-player slot.
+
+  3. PrepareItemCraftEvent (HIGH priority)
+     Safety net: if any ingredient in the crafting matrix is a plugin item, the
+     crafting result is cleared (set to null). Fires for both the 2×2 survival grid
+     and 3×3 crafting tables. Ensures no recipe output is possible even if the item
+     somehow ends up in the grid through an unconventional path.
+
+  4. InventoryMoveItemEvent (HIGH priority, ignoreCancelled = true)
+     Cancelled whenever the moved item is a plugin item. Covers automated transport
+     via hoppers, dispensers, and droppers, including cross-container suction.
+
+CHANGE — ChunkSelectorListener.buildSelectorItem()
+  Added pluginItemKey (chestclaims:plugin-item) field, initialized in constructor.
+  When the Chunk Selector item is created, it now receives two PDC tags:
+    chestclaims:chunk-selector = <claimUUID string>  (existing — identifies the claim)
+    chestclaims:plugin-item    = (byte) 1             (NEW — marks it as a protected item)
+
+CHANGE — ChestClaimsPlugin.onEnable()
+  Instantiates PluginItemProtectionListener and registers it as an event listener.
+  Import added: com.chestclaims.listener.PluginItemProtectionListener
+
+IDENTIFICATION RULE (enforced by code)
+  Plugin utility items MUST be identified by PersistentDataContainer tags, never by
+  display names. The chestclaims:plugin-item byte tag is the canonical marker.
+  Any future plugin-given item must set this tag in its builder method.
+
+PROTECTION COVERAGE
+  Vector                         Covered by
+  Crafting grid (2×2 survival)   InventoryClickEvent + PrepareItemCraftEvent
+  Crafting table (3×3)           InventoryClickEvent + PrepareItemCraftEvent
+  Anvil / Grindstone / Smithing  InventoryClickEvent
+  Loom / Cartography / Stonecutter InventoryClickEvent
+  Furnace / Blast Furnace / Smoker InventoryClickEvent
+  Brewing stand                  InventoryClickEvent
+  Chest / Barrel / Shulker Box   InventoryClickEvent
+  Ender Chest                    InventoryClickEvent
+  Hopper (manual)                InventoryClickEvent
+  Dispenser / Dropper (manual)   InventoryClickEvent
+  Hopper / Dropper / Dispenser   InventoryMoveItemEvent (automated transport)
+  (automated pull/push)
+  Drag into any container        InventoryDragEvent
+  Item drop                      PlayerDropItemEvent (existing, ChunkSelectorListener)
+  Player logout                  PlayerQuitEvent (existing, ChunkSelectorListener)
+  Flow end (cancel/confirm)      removeSelectorItem() (existing, ChunkSelectorListener)
+
+FILES CHANGED — v1.0.24
+  src/main/java/com/chestclaims/listener/PluginItemProtectionListener.java  (NEW)
+  src/main/java/com/chestclaims/listener/ChunkSelectorListener.java
+    — added pluginItemKey field (NamespacedKey "plugin-item")
+    — buildSelectorItem(): sets chestclaims:plugin-item BYTE tag
+  src/main/java/com/chestclaims/ChestClaimsPlugin.java
+    — registers PluginItemProtectionListener
+    — import added
+  build.gradle.kts — version 1.0.23 → 1.0.24
+
+MANUAL TESTING CHECKLIST — v1.0.24
+------------------------------------
+CHUNK SELECTOR PROTECTION
+[ ] Start Add Chunk flow. Receive Chunk Selector in inventory.
+    Open a crafting table. Try to place the Chunk Selector into the 3×3 grid.
+    Slot click must be cancelled — item must not enter the crafting grid.
+[ ] Open survival inventory (2×2 crafting). Try to shift-click Chunk Selector.
+    Must be cancelled — no item movement.
+[ ] With crafting table open: try to drag the Chunk Selector across crafting slots.
+    Drag must be cancelled — item stays in place.
+[ ] Open a chest. Shift-click Chunk Selector from your inventory.
+    Must be cancelled — item stays in your inventory.
+[ ] Open a chest. Left-click Chunk Selector (picks it up), then click a chest slot.
+    Must be cancelled — item cannot be placed in the chest.
+[ ] Open an anvil. Try to click Chunk Selector into the first/second slot.
+    Must be cancelled.
+[ ] Open a grindstone. Try to put Chunk Selector in either input slot.
+    Must be cancelled.
+[ ] Open a furnace / blast furnace / smoker. Try to put Chunk Selector in input or fuel slot.
+    Must be cancelled.
+[ ] Open a brewing stand. Try to put Chunk Selector in ingredient or bottle slot.
+    Must be cancelled.
+[ ] Open a smithing table. Try to put Chunk Selector in template/base/addition slot.
+    Must be cancelled.
+[ ] Set up a hopper below a container. Place Chunk Selector in the container above the hopper.
+    Hopper must NOT pull the Chunk Selector out. (InventoryMoveItemEvent blocked.)
+[ ] Set up a dispenser. Try to put Chunk Selector inside it.
+    InventoryClickEvent cancelled — cannot be placed.
+[ ] Drop the Chunk Selector (Q key) — must fail (PlayerDropItemEvent, existing).
+[ ] Log out while holding the Chunk Selector — it must be removed on re-login.
+    Actually: it's removed on LOGOUT (PlayerQuitEvent). After logging back in, selector gone.
+[ ] Confirm chunk (or cancel) — Chunk Selector is removed from inventory.
+
+NORMAL INVENTORY REARRANGING (must still work)
+[ ] With no container open (press E): freely move Chunk Selector around hotbar and inventory.
+    Must work. topType = PLAYER, no restriction.
+[ ] Hold Chunk Selector, right-click a block to select a chunk → flow still works.
+
+REGRESSION
+[ ] Non-plugin NETHER_STAR (natural) can still be placed in crafting / containers normally.
+    PluginItemProtectionListener only reacts to items tagged with chestclaims:plugin-item.
+[ ] All existing claim features (outline, access, chunk add flow, protection) unaffected.
+
+
+
+LATEST SESSION — 2026-06-15 (v1.0.23)
+--------------------------------------
+
+Version bumped: 1.0.22 → 1.0.23
+
+ROOT CAUSE ADDRESSED
+  Previously, ClaimProtectionListener only protected against player block-break/place events.
+  All environmental grief vectors (explosions into claims, fire, liquid flow, container looting)
+  were unprotected. ACTIVE claims now have comprehensive environmental protection.
+
+CHANGE 1 — Explosion protection extended to all claim blocks (EntityExplode, BlockExplode)
+
+  WHAT WAS BROKEN
+    TNT placed outside a claim could destroy blocks inside it. Creeper, wither, ender
+    crystal, TNT minecart, and bed/respawn-anchor explosions all bypassed claim protection.
+    Previously, only the anchor block (claim chest) was removed from explosion block lists.
+
+  FIX
+    `isExplosionProtected(Location)` now returns true if:
+      - The location is a claim anchor (always protected, any state), OR
+      - The location is inside any ACTIVE claim.
+    Both `onEntityExplode` and `onBlockExplode` use this helper to strip protected blocks
+    from the explosion's block list before destruction occurs.
+
+CHANGE 2 — Container access protection (PlayerInteractEvent)
+
+  WHAT WAS BROKEN
+    Non-authorized players could open and loot any inventory-holding block (furnace, hopper,
+    shulker box, brewing stand, etc.) inside someone else's ACTIVE claim simply by right-clicking.
+    Only the anchor block (claim chest) had access protection via ClaimInteractListener.
+
+  FIX — onContainerInteract
+    When a player right-clicks any block whose BlockState implements
+    org.bukkit.block.Container (i.e., any inventory-holding block), inside an ACTIVE claim:
+      - Owner, trusted players, team members (when enabled), admins → allowed.
+      - Everyone else → event cancelled, action-bar: "You can't open containers in this claim."
+    Anchor blocks are explicitly skipped here (ClaimInteractListener owns their handling).
+
+  COVERED BLOCK TYPES (via org.bukkit.block.Container interface):
+    Chest, Trapped Chest, Barrel, Shulker Box (all 16 colors), Furnace, Blast Furnace,
+    Smoker, Hopper, Dropper, Dispenser, Brewing Stand, Crafter, Lectern, Chiseled Bookshelf,
+    and any future block type that implements the Container interface.
+
+CHANGE 3 — Bucket-fill protection (PlayerBucketFillEvent)
+
+  WHAT WAS BROKEN
+    A player could fill a bucket from a water or lava source inside a claim they don't own,
+    effectively stealing liquid without triggering any block-break protection.
+
+  FIX — onBucketFill
+    Cancelled when the liquid source block is inside an ACTIVE claim and the player lacks access.
+    Message: "You can't take from blocks inside this claim."
+    Note: Bucket-empty (placing liquid) is already covered by the existing BlockPlaceEvent handler.
+
+CHANGE 4 — Fire burn protection extended to all claim blocks (BlockBurnEvent)
+
+  WHAT WAS BROKEN
+    Only the anchor block was protected from burning. All other blocks inside an ACTIVE claim
+    could be destroyed by fire.
+
+  FIX — onBlockBurn
+    Cancelled for any block inside an ACTIVE claim (in addition to anchor blocks, which remain
+    always protected regardless of claim state).
+
+CHANGE 5 — Fire spread prevention (BlockSpreadEvent, BlockIgniteEvent)
+
+  WHAT WAS BROKEN
+    Fire outside a claim could spread into it, creating fire blocks inside and eventually
+    burning claim contents (with BlockBurnEvent now cancelled, fire blocks would sit forever
+    and look griefed). Additionally, players with flint & steel or fire charges could ignite
+    blocks inside someone else's claim.
+
+  FIX — onBlockSpread
+    Cancelled when the new block state would be FIRE or SOUL_FIRE and the target location is
+    inside an ACTIVE claim. Prevents fire from entering the claim boundary.
+
+  FIX — onBlockIgnite
+    Two cases cancelled inside ACTIVE claims:
+      1. Player-caused (flint & steel, fire charge): cancelled if player lacks access.
+         Message: "You cannot start fires inside this claim."
+      2. Lava-caused (IgniteCause.LAVA): cancelled unconditionally to prevent lava adjacent
+         to a claim from igniting blocks inside it.
+      Lightning: intentionally NOT cancelled (acts of God).
+      Fire spreading (IgniteCause.SPREAD): handled by BlockSpreadEvent above.
+
+CHANGE 6 — Liquid grief prevention (BlockFromToEvent)
+
+  WHAT WAS BROKEN
+    Water or lava placed outside an ACTIVE claim could flow into it, flooding or griefing
+    the interior. Lava could additionally destroy items and blocks inside the claim.
+
+  FIX — onBlockFromTo
+    Cancelled when:
+      - The source block is liquid (water or lava), AND
+      - The destination block is inside an ACTIVE claim, AND
+      - The source block is NOT inside the same claim.
+    This allows owner-placed liquid to flow freely within their own claim boundaries, while
+    external liquid is stopped at the claim border. Liquid from claim A is also blocked from
+    flowing into claim B.
+
+PROTECTION SUMMARY — v1.0.23 (ACTIVE claims only; INACTIVE = no protection)
+------------------------------------------------------------------------------
+Vector                        Coverage
+Player block-break            BlockBreakEvent (existing)
+Player block-place            BlockPlaceEvent (existing)
+Anchor break (any player)     BlockBreakEvent — always protected, any state (v1.0.22)
+Explosion (entity/block)      EntityExplodeEvent + BlockExplodeEvent — all claim blocks (NEW)
+Container looting             PlayerInteractEvent on Container blocks (NEW)
+Bucket fill (liquid drain)    PlayerBucketFillEvent (NEW)
+Block bucket-place            BlockPlaceEvent (existing — covers bucket-empty placement)
+Fire burn                     BlockBurnEvent — all claim blocks (EXTENDED from anchor-only)
+Fire spread into claim        BlockSpreadEvent (NEW)
+Player ignition (flint/steel) BlockIgniteEvent player-caused (NEW)
+Lava ignition                 BlockIgniteEvent IgniteCause.LAVA (NEW)
+Liquid flow from outside      BlockFromToEvent (NEW)
+
+KNOWN REMAINING GAPS (documented, not fixed in this pass)
+----------------------------------------------------------
+These grief vectors are NOT yet protected. Add in a future pass if needed:
+
+1. Piston extension/retraction
+   A piston outside a claim could push blocks into or pull blocks from an ACTIVE claim.
+   Fix: BlockPistonExtendEvent + BlockPistonRetractEvent — check pushed block destinations.
+
+2. Endermen stealing blocks
+   Endermen can pick up certain blocks (dirt, gravel, concrete powder, etc.) inside claims.
+   Fix: EntityChangeBlockEvent where entity is Enderman + block is inside ACTIVE claim.
+
+3. Hopper pulling items through walls
+   A hopper placed outside but immediately below an ACTIVE claim's container border
+   may be able to pull items out of a container one block above inside the claim.
+   Fix: InventoryMoveItemEvent — check if destination inventory is outside the claim of
+   the source inventory.
+
+4. Silverfish / zombie griefing
+   Silverfish infect stone blocks; zombies break doors. Both trigger EntityChangeBlockEvent.
+   Fix: EntityChangeBlockEvent for the relevant entity types inside ACTIVE claims.
+
+5. Wither spawning destruction
+   The wither's initial spawn explosion is an EntityExplodeEvent (now covered), but the
+   wither's blue skull bypasses blast resistance. Covered by EntityExplodeEvent.
+   Wither skull direct hits on blocks: EntityChangeBlockEvent. Likely low priority.
+
+FILES CHANGED — v1.0.23
+  src/main/java/com/chestclaims/listener/ClaimProtectionListener.java
+    — onBlockBreak / onBlockPlace: unchanged (v1.0.22)
+    — onContainerInteract (NEW): container access in ACTIVE claims
+    — onBucketFill (NEW): bucket fill from inside claim
+    — onEntityExplode (EXTENDED): now removes all ACTIVE claim blocks from blast list
+    — onBlockExplode (EXTENDED): same
+    — isExplosionProtected() helper (NEW): covers anchor + ACTIVE claim blocks
+    — onBlockBurn (EXTENDED): protects all ACTIVE claim blocks, not just anchor
+    — onBlockSpread (NEW): cancels fire spreading into ACTIVE claims
+    — onBlockIgnite (NEW): blocks player & lava-caused ignition inside ACTIVE claims
+    — onBlockFromTo (NEW): blocks liquid from outside flowing into ACTIVE claims
+    — added imports: Action, BlockFromToEvent, BlockIgniteEvent, BlockSpreadEvent,
+                     PlayerBucketFillEvent, PlayerInteractEvent, EquipmentSlot,
+                     Player, Location, Material
+
+  build.gradle.kts — version 1.0.22 → 1.0.23
+
+MANUAL TESTING CHECKLIST — v1.0.23
+------------------------------------
+EXPLOSION PROTECTION
+[ ] Place TNT next to an ACTIVE claim wall. Detonate. Blocks inside the claim must survive.
+    Blocks outside the claim (or at the edge) may still be destroyed.
+[ ] Spawn a creeper next to a claim wall. Creeper explosion must not destroy blocks inside.
+[ ] In Nether/End: use a bed/respawn anchor adjacent to claim. Blocks inside survive.
+[ ] TNT minecart: run one into a claim wall. Interior blocks survive.
+[ ] Ender crystal: detonate near claim. Interior blocks survive.
+[ ] INACTIVE claim: blocks CAN be destroyed by explosions (no protection).
+
+CONTAINER ACCESS
+[ ] Non-owner right-clicks a furnace inside ACTIVE claim → "You can't open containers in this claim."
+[ ] Non-owner right-clicks a hopper inside ACTIVE claim → same message.
+[ ] Non-owner right-clicks a shulker box inside ACTIVE claim → same message.
+[ ] Non-owner right-clicks a dispenser inside ACTIVE claim → same message.
+[ ] Non-owner right-clicks a brewing stand inside ACTIVE claim → same message.
+[ ] Non-owner right-clicks a chest that IS the anchor → existing "This claim belongs to {owner}."
+    message (ClaimInteractListener, not the new handler).
+[ ] Owner right-clicks any container → opens normally.
+[ ] Trusted player right-clicks any container → opens normally.
+[ ] Admin (chestclaims.admin) right-clicks any container → opens normally.
+[ ] INACTIVE claim: non-owner can open all containers.
+
+BUCKET PROTECTION
+[ ] Non-owner uses empty bucket on water source inside ACTIVE claim → cancelled,
+    "You can't take from blocks inside this claim."
+[ ] Owner uses empty bucket on water inside own claim → works normally.
+[ ] Non-owner tries to place water via bucket inside ACTIVE claim → blocked (BlockPlaceEvent,
+    message "You cannot place blocks inside this claim.").
+
+FIRE PROTECTION
+[ ] Light fire outside an ACTIVE claim (on a flammable block). Wait for fire to spread.
+    Fire must not spread across the claim boundary (BlockSpreadEvent).
+[ ] Right-click flint & steel inside ACTIVE claim as non-owner → "You cannot start fires
+    inside this claim."
+[ ] Owner uses flint & steel inside own claim → works.
+[ ] Place lava adjacent to claim boundary. Lava must not ignite blocks inside claim (BlockIgniteEvent LAVA).
+[ ] Even if fire somehow exists inside a claim, it must not destroy blocks (BlockBurnEvent).
+[ ] Lightning strike inside a claim creates fire normally (acts of God, intentionally not blocked).
+
+LIQUID GRIEF
+[ ] Place water source one block from claim boundary. Water must stop at the claim edge,
+    not flow inside (BlockFromToEvent).
+[ ] Place lava source next to claim. Lava must not flow in.
+[ ] Owner places water inside own claim → flows freely within the claim.
+[ ] Water placed by owner near the claim edge → flows within claim, stops at boundary.
+[ ] INACTIVE claim: liquid can flow in normally.
+
+REGRESSION (existing protection, must still work)
+[ ] Non-owner breaks block inside ACTIVE claim → blocked.
+[ ] Non-owner places block inside ACTIVE claim → blocked.
+[ ] Owner breaks anchor → Delete GUI.
+[ ] Trusted player builds/breaks inside ACTIVE claim → allowed.
+[ ] INACTIVE claim → no protection on any of the above.
+[ ] Outline/hologram/access/chunk features all unaffected.
+
+LATEST SESSION — 2026-06-15 (v1.0.22)
+--------------------------------------
+
+Version bumped: 1.0.21 → 1.0.22
+
+CHANGE 1 — Claim chest (anchor) protection hardened
+
+  WHAT WAS BROKEN
+    - Non-owners could break claim anchor blocks if the claim was INACTIVE (no upkeep).
+    - Explosions (TNT, creeper, bed/respawn anchor) could destroy the anchor block, leaving
+      a ghost claim in storage with no physical chest and no way to clean it up in-game.
+    - Fire could spread to and burn barrel-type anchors.
+
+  FIX — ClaimProtectionListener.java
+    onBlockBreak: Removed the INACTIVE bypass for anchor blocks. The anchor is now ALWAYS
+    protected from non-owner breaking, regardless of claim state (ACTIVE or INACTIVE).
+      - Owner and admins (chestclaims.admin) → delete GUI.
+      - Anyone else → event cancelled, action-bar: "You can't break this claim chest."
+      - Message unified to a single clear line instead of two different messages.
+      - Admin bypass: ops with chestclaims.admin permission can open the delete GUI on any claim.
+
+    onEntityExplode (NEW): removes anchor blocks from explosion block lists so TNT and
+    creepers cannot destroy claim chests.
+
+    onBlockExplode (NEW): same protection against block-source explosions (beds in Nether,
+    respawn anchors in Overworld, etc.).
+
+    onBlockBurn (NEW): cancels fire-burn events targeting anchor blocks (protects barrel
+    anchors from fire spread).
+
+CHANGE 2 — Ghost/floating outline prevention
+
+  WHAT WAS BROKEN
+    If a claim anchor block was somehow removed (server crash, world edit, pre-fix explosion)
+    without going through the proper deletion flow, the claim remained in storage with
+    outlineEnabled = true, causing particles to keep rendering in the world with no physical
+    chest underneath — a "ghost outline."
+
+  FIX — ClaimOutlineTask.java (runtime check)
+    Before rendering any outline for a claim, ClaimOutlineTask now verifies that the anchor
+    block at claim.getAnchor() is still a CHEST, TRAPPED_CHEST, or BARREL in a loaded chunk.
+    If the block is gone or wrong material:
+      - Claim is removed from ClaimStorage.
+      - Hologram is removed via ClaimHologramManager.onClaimDeleted().
+      - Claims file is saved immediately.
+      - Warning logged: "Claim <id> owned by <name> has no anchor block at X,Y,Z in '<world>' — removing orphaned claim."
+    Orphans are collected during the iteration, cleaned up after, so no ConcurrentModification.
+
+  FIX — ClaimStorage.removeClaimsWithMissingAnchors() (startup scan)
+    New method scans all loaded claims at plugin startup. For each claim whose anchor block
+    is not a chest/barrel:
+      - Removes it from the claims list.
+      - Saves the updated claims.yml.
+      - Returns the removed list so the caller can log each removal.
+    Skips claims in worlds that are not currently loaded (no false positives for unloaded worlds).
+
+  FIX — ChestClaimsPlugin.onEnable() (startup validation)
+    After claimStorage.load() and before hologramManager.init(), calls
+    claimStorage.removeClaimsWithMissingAnchors(). Each removed claim is logged at WARNING
+    level with its ID, owner, coordinates, and world. Total count logged at INFO level.
+    This means no hologram is ever spawned for a claim with a missing anchor.
+
+FILES CHANGED
+  src/main/java/com/chestclaims/listener/ClaimProtectionListener.java
+    — onBlockBreak: removed INACTIVE bypass for anchor blocks; unified message;
+      added chestclaims.admin bypass
+    — onEntityExplode (new): removes anchor blocks from explosion lists
+    — onBlockExplode (new): same for block-source explosions
+    — onBlockBurn (new): cancels fire-spread onto anchor blocks
+    — imports: BlockBurnEvent, BlockExplodeEvent, EntityExplodeEvent added
+
+  src/main/java/com/chestclaims/listener/ClaimOutlineTask.java
+    — run(): per-claim anchor validity check before rendering; orphan cleanup after loop
+    — imports: Material, ArrayList, List added
+
+  src/main/java/com/chestclaims/claim/ClaimStorage.java
+    — removeClaimsWithMissingAnchors(): new public method for startup anchor scan
+    — imports: Material added
+
+  src/main/java/com/chestclaims/ChestClaimsPlugin.java
+    — onEnable(): calls removeClaimsWithMissingAnchors() before hologramManager.init();
+      logs each orphaned claim and the total removed count
+    — imports: ClaimData added
+
+  build.gradle.kts — version bumped 1.0.21 → 1.0.22
+
+PROTECTION TABLE UPDATE (v1.0.22)
+                              ACTIVE         INACTIVE
+Anchor break (owner)          DELETE GUI     DELETE GUI
+Anchor break (admin*)         DELETE GUI     DELETE GUI
+Anchor break (trusted/team)   BLOCK + msg   BLOCK + msg   ← INACTIVE now also blocked
+Anchor break (other)          BLOCK + msg   BLOCK + msg   ← INACTIVE now also blocked
+Anchor explosion              REMOVED FROM BLAST LIST (all states)
+Anchor fire/burn              CANCELLED (all states)
+
+* chestclaims.admin permission
+
+MANUAL TESTING CHECKLIST — v1.0.22
+[ ] Non-owner tries to break ACTIVE claim chest → blocked: "You can't break this claim chest."
+[ ] Non-owner tries to break INACTIVE claim chest → same block message (regression from old behavior where INACTIVE fell through)
+[ ] Trusted player tries to break claim chest → blocked: "You can't break this claim chest."
+[ ] Owner breaks claim chest → "Delete Claim?" GUI opens normally.
+[ ] Admin (chestclaims.admin) breaks another player's claim chest → "Delete Claim?" GUI opens.
+[ ] TNT explodes next to claim chest → chest block survives, surrounding blocks may be destroyed.
+[ ] Creeper explodes next to claim chest → same.
+[ ] Place a barrel as a claim anchor. Light a fire near it. Fire should not spread to the barrel.
+[ ] Delete a claim via GUI. On next outline tick (within ~20 ticks), outline stops.
+[ ] Manually remove an anchor block from claims.yml claim (simulate orphaned claim).
+    Restart server → server log shows orphaned claim removal warning. Claim not in game.
+[ ] Orphaned claim with outlineEnabled=true: if somehow in storage at runtime, outline task
+    logs warning and removes it on the next outline tick. No persistent ghost particles.
+
+BUGFIX SESSION — 2026-06-15 (chunk claim outline rendering)
+------------------------------------------------------------
+
+WHAT WAS BROKEN
+  Chunk claim outlines were effectively invisible. The previous implementation called
+  OutlineTask.drawOutline() — a 3D cuboid renderer — for chunk claims, passing pos1 and
+  pos2 whose Y values span the full world height (minHeight = -64, maxHeight - 1 = 319,
+  a 383-block range). The vertical edges had only 15 particles each (the maxPerEdge cap),
+  making them 1 particle per ~25 blocks and invisible in practice. The horizontal cap edges
+  were drawn at y = -64 (underground) and y = 320 (above the sky), neither of which are
+  visible to a player standing at ground level.
+
+  As a result: toggling the outline ON for a chunk claim did nothing visible in-game.
+
+ROOT CAUSE
+  OutlineTask is designed for finite 3D selections where pos1/pos2 form a compact box.
+  Chunk claims store pos1/pos2 spanning the FULL WORLD HEIGHT (set by startChunkClaimSession
+  to world.getMinHeight() / world.getMaxHeight()-1). Drawing a 3D cuboid on this range
+  was always wrong for the chunk-claim use case.
+
+FIX
+  Replaced the per-chunk-cuboid approach with a horizontal perimeter ring. For each claimed
+  chunk, up to 4 horizontal edges are drawn at the player's current Y + 1. An edge is only
+  drawn if the neighboring chunk is NOT in the claim's claimedChunks set — so internal
+  shared edges are skipped and only the outer boundary is drawn.
+
+  A new package-private static method OutlineTask.spawnLine() provides the particle line
+  primitive. Both ClaimOutlineTask and ClaimBorderTask call it.
+
+FILES CHANGED
+  src/main/java/com/chestclaims/listener/OutlineTask.java
+    — added static spawnLine() for a single particle line segment
+
+  src/main/java/com/chestclaims/listener/ClaimOutlineTask.java
+    — replaced chunk branch in drawClaimOutline() with drawChunkPerimeter()
+    — drawChunkPerimeter() draws outer horizontal edges at player Y+1
+    — added imports: Particle, java.util.Set
+
+  src/main/java/com/chestclaims/listener/ClaimBorderTask.java
+    — same replacement applied (shears-preview border, same logic)
+    — added imports: Particle, java.util.Set
+
+HOW CHUNK OUTLINE RENDERING NOW WORKS
+  ClaimOutlineTask (owner-toggled persistent outline, all nearby players):
+    For each chunk claim with outlineEnabled = true:
+      For each online player within claim-outline.view-distance-blocks of the anchor:
+        → For each chunk key in claimedChunks:
+             Check 4 orthogonal neighbors; skip edges whose neighbor is also claimed.
+             Draw surviving edges as horizontal DUST particle lines at (player.Y + 1).
+        → Uses claim.getOutlineColor() for the particle color.
+        → Particle density: selection-outline.max-particles-per-edge (default 15) per
+          16-block edge → ~1 particle/block, same density as custom claim edges.
+
+  ClaimBorderTask (shears-preview, per-player while holding shears):
+    Identical horizontal perimeter logic, color = selection-outline.particle-color (orange).
+
+  Custom (non-chunk) claims are unchanged: still use 3D cuboid via OutlineTask.drawOutline().
+
+  PARTICLE COUNT PER TICK (worst case, max-particles-per-edge = 15):
+    1-chunk claim:  4 outer edges × 16 particles = 64 particles per player per tick
+    2-chunk claim:  6 outer edges × 16 particles = 96 particles
+    N-chunk claim:  at most (2N+2) outer edges    — well under any spam threshold
+
+  CLEANUP / LIFECYCLE (unchanged from before):
+    Particles are ephemeral (DUST, ~1.5 s lifetime). Toggling the outline OFF simply stops
+    scheduling new particles; old ones expire naturally within 2 ticks. Player logout, claim
+    removal, and claim-outline.enabled = false all stop the rendering on the next task tick.
+
+KNOWN LIMITATION
+  The view-distance check in ClaimOutlineTask uses distance from the anchor block.
+  For large multi-chunk claims the far end may be >32 blocks from the anchor, putting
+  part of the perimeter outside the default view distance. Increase
+  claim-outline.view-distance-blocks in config.yml if needed.
+
+MANUAL TESTING — CHUNK OUTLINE
+  [ ] Create a single chunk claim. Open Claim Management → Outline Settings → toggle ON.
+      Stand inside the chunk. Horizontal particle ring should appear at your feet (+1 Y),
+      framing the full 16×16 chunk boundary.
+  [ ] Move up/down inside the chunk. Ring adjusts to your new Y on the next refresh tick.
+  [ ] Stand outside the chunk within 32 blocks of the anchor. Ring still visible.
+  [ ] Toggle outline OFF (Outline Settings → slot 4). Particles stop within ~2 seconds.
+  [ ] Change outline color in Outline Settings. Ring reappears in the selected color.
+  [ ] Add a second adjacent chunk (Add Chunk flow). Ring should show ONLY the outer
+      perimeter — the shared internal edge between the two chunks must NOT appear.
+  [ ] Add a third chunk to form an L-shape. Inner edges still absent; outer boundary correct.
+  [ ] Hold shears (border preview mode). Chunk outline ring also appears as the orange
+      shears preview. Internal edges of multi-chunk claims absent here too.
+  [ ] Custom (non-chunk) claims unaffected — 3D cuboid outline still works normally.
+  [ ] Delete the chunk claim. Outline stops (claim removed from storage, task skips it).
+  [ ] Server restart with chunk claim that has outlineEnabled = true. Outline resumes
+      automatically (state loaded from claims.yml).
+
+LATEST SESSION — 2026-06-14 (v1.0.21)
+--------------------------------------
+
+Version bumped: 1.0.20 → 1.0.21
+
+CHANGE 1 — Chunk claim outline support
+  Chunk claims now fully support the owner-toggled outline (ClaimOutlineTask) and
+  shears border preview (ClaimBorderTask).
+  NOTE: The initial per-chunk-cuboid implementation was found to be invisible in-game
+  (pos1/pos2 span full world height; 15-particle cap made vertical edges imperceptible).
+  Fixed 2026-06-15: now draws a horizontal perimeter ring at the player's Y+1, with
+  internal shared edges between claimed chunks skipped. See BUGFIX SESSION above.
+
+CHANGE 2 — Outline Settings GUI (replaces simple toggle)
+  In the Claim Management screen (slot 11), the "Claim Outline: ON/OFF" toggle
+  has been replaced with an "Outline Settings" button.
+
+  New file: gui/OutlineSettingsGUI.java
+  New screen: ClaimManageHolder.Screen.OUTLINE_SETTINGS
+  The GUI (27 slots) shows:
+    Slot 4:   Toggle (ON/OFF, LIME_DYE / GRAY_DYE)
+    Slots 10–16: 7 color choices (GREEN, BLUE, RED, YELLOW, PURPLE, AQUA, WHITE)
+    Slot 22:  Back button (ARROW)
+  Selecting a color saves it per-claim; the outline renders in that color.
+  Default color is AQUA (0,200,255), unchanged from previous behavior.
+
+  New file: claim/OutlineColor.java  — enum with 7 colors (displayName, rgb, material).
+
+  New ClaimData fields:
+    outlineColor (String, RGB format, default "0,200,255")
+  New ClaimStorage YAML key: outline-color (String)
+  Migration: old claims without outline-color default to "0,200,255".
+
+CHANGE 3 — Add Chunk feature (multi-chunk expansion)
+  Chunk claim owners can expand their claim into adjacent chunks without commands.
+
+  New files:
+    gui/ChunkAddConfirmHolder.java  — InventoryHolder for the add-chunk confirm GUI
+    gui/ChunkAddConfirmGUI.java     — 27-slot confirm GUI showing chunk details/cost
+    listener/ChunkSelectorListener.java — handles selector item give, right-click
+                                          detection, logout cleanup
+
+  New ClaimData fields:
+    claimedChunks (LinkedHashSet<String>, each entry = "chunkX,chunkZ")
+    pos1/pos2 made non-final (setters added) so bounding box can expand on chunk add
+  New ClaimStorage YAML key: claimed-chunks (list of strings)
+  Migration: old chunk claims without claimed-chunks derive the initial chunk from pos1.
+  New ClaimStorage method: isChunkClaimed(chunkX, chunkZ, world, excludeClaimId)
+
+  Flow:
+    1. Open Claim Management on a chunk claim → new "Add Chunk" button at slot 22.
+    2. Click Add Chunk → player receives a NETHER_STAR "Chunk Selector" item
+       (tagged with PDC key chestclaims:chunk-selector = claimUUID).
+    3. Player right-clicks any block in the target chunk → validation runs:
+         - Same world as claim
+         - Target chunk not already in this claim
+         - Target chunk orthogonally adjacent to at least one claimed chunk
+         - Target chunk not already claimed by another claim
+       Invalid: error message, selector stays (try again).
+       Valid: ChunkAddConfirmGUI opens.
+    4. Confirm GUI (27 slots) shows chunk coords, current/new chunk count, cost,
+       new upkeep. Slots 11/13/15 = Confirm / Details / Cancel.
+    5. On Confirm: Bops charged, chunk added to claimedChunks, bounding box expanded,
+       upkeep updated (chunkCount × upkeep-bops-per-day), saved.
+    6. On Cancel or logout: selector item removed, no charge.
+
+  Selector rules:
+    - Cannot be dropped (PlayerDropItemEvent cancelled if item has PDC tag).
+    - Removed on player logout.
+    - Only the owner whose UUID is in the PDC can trigger the flow.
+    - Item is NETHER_STAR (cannot be placed as a block).
+
+  Upkeep scaling: when chunks are added, dailyUpkeepCost = chunkCount × upkeep-bops-per-day.
+  Initial single-chunk claim upkeep is unchanged (1 × upkeep-bops-per-day).
+
+CHANGE 4 — ClaimData.contains() updated for multi-chunk
+  For chunk claims with claimedChunks populated, contains() checks the chunk key set
+  instead of the AABB. This gives precise protection (no over-protection of gaps).
+
+FILES MODIFIED
+--------------
+  src/main/java/com/chestclaims/claim/ClaimData.java        — new fields + updated contains()
+  src/main/java/com/chestclaims/claim/ClaimStorage.java     — new fields serialized, isChunkClaimed()
+  src/main/java/com/chestclaims/gui/ClaimManageGUI.java     — outline toggle → Outline Settings,
+                                                               Add Chunk button for chunk claims
+  src/main/java/com/chestclaims/gui/ClaimManageHolder.java  — OUTLINE_SETTINGS added to Screen enum
+  src/main/java/com/chestclaims/listener/ClaimOutlineTask.java — per-claim color, per-chunk outlines
+  src/main/java/com/chestclaims/listener/ClaimBorderTask.java  — per-chunk outlines
+  src/main/java/com/chestclaims/listener/GUIListener.java   — new screen handlers, chunk add logic,
+                                                               ChunkSelectorListener wired in,
+                                                               claimedChunks populated on initial confirm
+  src/main/java/com/chestclaims/ChestClaimsPlugin.java      — ChunkSelectorListener registered
+
+FILES CREATED
+-------------
+  src/main/java/com/chestclaims/claim/OutlineColor.java
+  src/main/java/com/chestclaims/gui/OutlineSettingsGUI.java
+  src/main/java/com/chestclaims/gui/ChunkAddConfirmHolder.java
+  src/main/java/com/chestclaims/gui/ChunkAddConfirmGUI.java
+  src/main/java/com/chestclaims/listener/ChunkSelectorListener.java
+
+NEW CONFIG KEYS (config.yml messages section)
+---------------------------------------------
+  messages.chunk-selector-given
+  messages.chunk-selector-no-space
+  messages.chunk-selector-cancelled
+  messages.chunk-added           (placeholders: {cx}, {cz}, {cost})
+  messages.chunk-not-adjacent
+  messages.chunk-already-claimed
+  messages.chunk-already-in-claim
+
+MANUAL TESTING CHECKLIST
+------------------------
+[ ] Single chunk claim — outline toggle in Outline Settings opens, ON/OFF works
+[ ] Outline Settings — pick each of 7 colors, verify particle color changes on server
+[ ] Back button in Outline Settings returns to Claim Management
+[ ] Chunk claim info item shows "Chunks: 1 chunk(s)"
+[ ] Add Chunk button appears for active chunk claims, not for custom claims
+[ ] Add Chunk button not shown for INACTIVE chunk claims
+[ ] Clicking Add Chunk gives NETHER_STAR Chunk Selector in inventory
+[ ] Full inventory blocks Add Chunk with error message
+[ ] Cannot drop the Chunk Selector
+[ ] Right-clicking a block in same chunk shows "already in claim" error
+[ ] Right-clicking a non-adjacent chunk shows "not connected" error
+[ ] Right-clicking a chunk claimed by another player shows "already claimed" error
+[ ] Right-clicking a valid adjacent chunk opens ChunkAddConfirmGUI
+[ ] Confirm GUI shows correct chunk coords, current/new chunk count, cost, new upkeep
+[ ] Clicking Confirm charges Bops and adds chunk (verify in claims.yml)
+[ ] Clicking Cancel removes selector, sends cancelled message, no charge
+[ ] Logging out during selection removes selector
+[ ] After adding chunk, outline shows only the OUTER perimeter of the two-chunk claim;
+    the shared internal edge between the two chunks must NOT have particles
+[ ] ClaimBorderTask (holding shears) also draws horizontal outer perimeter for multi-chunk claims
+[ ] Protection: can't break blocks in second chunk unless trusted/owner
+[ ] Protection: can break blocks in gap between two non-adjacent chunks (if any)
+[ ] Existing custom claims unaffected — outline toggle, access, delete all work
 
 LATEST SESSION — 2026-06-12 (v1.0.20)
 --------------------------------------
@@ -95,23 +795,33 @@ PREVIOUS SESSIONS
   v1.0.9  — claim holograms, setup sounds
 
 
-MANAGE GUI LAYOUT (3 rows, 27 slots) — current as of v1.0.18
+MANAGE GUI LAYOUT (3 rows, 27 slots) — current as of v1.0.21
 --------------------------------------------------------------
 Title: "Claim Management" (dark aqua)
 
-Slot 11: LIME_DYE / GRAY_DYE — "Claim Outline: ON" / "Claim Outline: OFF"
-         Clicking toggles the claim boundary outline for nearby players.
+Slot 11: LIME_DYE / GRAY_DYE — "Outline Settings" (aqua)
+         Lore shows current outline ON/OFF state + invite to open settings.
+         Clicking opens the Outline Settings GUI (see layout below).
 
 Slot 13: CHEST — "Your Claim" (gold) — centered
-         Lore:
-           Owner:      <name>                    (white)
+         Lore (chunk claims only, prepended):
+           Type:       "Chunk Claim"              (aqua)
+           Chunks:     <N> chunk(s)               (white)
+         Lore (all claims):
+           Owner:      <name>                     (white)
            Price Paid: <cost, comma-formatted> Bops  (yellow)
            Upkeep:     <N> Bops / <cycle-name>   (yellow)
-                    OR "Disabled"                (gray)
+                    OR "Disabled"                 (gray)
 
 Slot 15: NAME_TAG — "Claim Access" (light purple)
          Lore: "Manage trusted players and team access for this claim." + "Click to manage."
          Clicking opens the Claim Access GUI.
+
+Slot 22: BLUE_CONCRETE — "Add Chunk" (aqua) — chunk claims only, ACTIVE state only
+         Lore: expand into an adjacent chunk; click to start.
+         Clicking gives the player a NETHER_STAR Chunk Selector item via
+         ChunkSelectorListener.startSelection(). Not shown for INACTIVE chunk claims
+         or custom claims.
 
 All other slots: empty (Bedrock-friendly, no glass fillers)
 
@@ -141,6 +851,57 @@ Slot 22: ARROW — "Back" (gray)
   - Returns to main Claim Management GUI.
 
 Owner-only: non-owners cannot open or interact with this GUI.
+
+OUTLINE SETTINGS GUI LAYOUT (3 rows, 27 slots) — new in v1.0.21
+-------------------------------------------------------------
+Title: "Outline Settings" (dark aqua)
+
+Slot 4:   LIME_DYE "Outline: ON" (green) / GRAY_DYE "Outline: OFF" (gray)
+          Clicking toggles claim.outlineEnabled, saves, and reopens the Outline Settings GUI.
+
+Slots 10–16: 7 color options in OutlineColor.values() order:
+  Slot 10: LIME_WOOL   "Green"  — rgb 50,205,50
+  Slot 11: BLUE_WOOL   "Blue"   — rgb 30,100,255
+  Slot 12: RED_WOOL    "Red"    — rgb 255,50,50
+  Slot 13: YELLOW_WOOL "Yellow" — rgb 255,220,0
+  Slot 14: PURPLE_WOOL "Purple" — rgb 160,0,230
+  Slot 15: CYAN_WOOL   "Aqua"   — rgb 0,200,255  ← default
+  Slot 16: WHITE_WOOL  "White"  — rgb 255,255,255
+  Currently selected color shows "(Selected)" (gold) in lore.
+  Unselected colors show "Click to select." (yellow).
+  Clicking a color saves it to claim.outlineColor and reopens the GUI.
+
+Slot 22: ARROW — "Back" (gray) — returns to Claim Management.
+
+Owner-only: non-owners cannot open or interact with this GUI.
+
+
+CHUNK ADD CONFIRM GUI LAYOUT (3 rows, 27 slots) — new in v1.0.21
+-------------------------------------------------------------
+Title: "Add Chunk?" (dark aqua)
+
+Slot 11: LIME_CONCRETE "Confirm - Add Chunk" (green)
+         Lore: Cost: <N> Bops / Click to confirm.
+         On click: charges Bops, adds chunk to claimedChunks, expands bounding box (pos1/pos2),
+         updates dailyUpkeepCost = chunkCount × upkeep-bops-per-day, saves, removes selector.
+
+Slot 13: MAP "Chunk Details" (aqua)
+         Lore:
+           Chunk X: <cx>                           (white)
+           Chunk Z: <cz>                           (white)
+           [blank line]
+           Current size: <N> chunk(s)              (white)
+           New size:     <N+1> chunk(s)            (white)
+           [blank line]
+           Cost: <N> Bops                          (white)
+           New upkeep: <N> Bops / <cycle>          (white)  — only if upkeep.enabled = true
+
+Slot 15: RED_CONCRETE "Cancel" (red)
+         Lore: "Click to cancel. No charge."
+         On click: removes selector from inventory, sends chunk-selector-cancelled message.
+
+Owner-only: non-owners cannot trigger or use this GUI.
+
 
 SELECT PLAYER GUI LAYOUT (6 rows, 54 slots) — new in v1.0.18
 -------------------------------------------------------------
@@ -283,18 +1044,40 @@ Key behavior: WorldGuard always wins. ChestClaims only acts on events that World
 No WorldGuard API integration is required — this works purely via event priority ordering.
 
 
-CLAIM OUTLINE TOGGLE SYSTEM
------------------------------
-Owner right-clicks anchor → Claim Management GUI → slot 11 (Outline Toggle).
-Clicking toggles claim.outlineEnabled and saves claims.yml immediately.
+CLAIM OUTLINE SETTINGS SYSTEM (v1.0.21 + 2026-06-15 bugfix)
+--------------------------------------------------------------
+Owner right-clicks anchor → Claim Management GUI → slot 11 (Outline Settings) →
+opens OutlineSettingsGUI (27 slots, see layout above).
+
+Toggle (slot 4) saves claim.outlineEnabled immediately and reopens the GUI.
+Color selection (slots 10–16) saves claim.outlineColor (RGB string) immediately and reopens.
+Back (slot 22) returns to Claim Management.
 
 When outlineEnabled = true:
   ClaimOutlineTask (server-wide BukkitRunnable, runs every claim-outline.update-ticks ticks)
   → for each claim with outlineEnabled:
     → for each online player within claim-outline.view-distance-blocks (horizontal from anchor):
-      → draws DUST particle outline (12 edges + 8 corner markers) around the claim
-  Color: cyan (0,200,255) by default.
+
+  CUSTOM CLAIMS: 3D cuboid outline (12 edges + 8 corners) via OutlineTask.drawOutline().
+    Uses claim.getOutlineColor() (per-claim). Color default: AQUA ("0,200,255").
+
+  CHUNK CLAIMS: horizontal perimeter ring via drawChunkPerimeter().
+    Drawn at player.getBlockY() + 1 (adjusts on each refresh tick as player moves).
+    For each chunk in claimedChunks, only outer edges are drawn: edges adjacent to a chunk
+    NOT in claimedChunks. Internal shared edges between claimed chunks are skipped.
+    Uses claim.getOutlineColor() (per-claim).
+
+  Both modes use selection-outline.max-particles-per-edge (default 15) for density
+  and selection-outline.particle-size (default 1.0).
   Bedrock-compatible (DUST particles work via Geyser).
+
+ClaimBorderTask (shears preview) applies the same split:
+  Custom claims → 3D cuboid.
+  Chunk claims  → horizontal outer perimeter ring (same algorithm).
+  Color = selection-outline.particle-color (orange default) for all claims.
+
+Note: claim-outline.particle-color in config.yml is never read by ClaimOutlineTask —
+per-claim color from OutlineColor enum is used. The config key is dead.
 
 
 IN-GAME TEST CHECKLIST (manual — do not run server yourself)
@@ -375,13 +1158,14 @@ PERSISTENCE (v1.0.18)
 
 CLAIM SHOP REMOVED (v1.0.14)
 1.  Right-click claim anchor chest → "Claim Management" opens.
-    GUI has ONLY slot 11 (outline toggle) and slot 13 (chest info).
-    No NETHER_STAR "Claim Shop" button at slot 15. No shop anywhere.
-2.  No shop GUI exists. Clicking any empty slot does nothing.
+    GUI has slot 11 (Outline Settings), slot 13 (chest info), slot 15 (Claim Access).
+    No NETHER_STAR "Claim Shop" anywhere. For chunk claims (ACTIVE): slot 22 "Add Chunk".
+2.  Clicking any empty slot does nothing.
 
 CLAIM MANAGEMENT GUI
-3.  Slot 11: GRAY_DYE "Claim Outline: OFF" (if outline disabled).
-    Slot 13: CHEST "Your Claim" — lore shows:
+3.  Slot 11: GRAY_DYE "Outline Settings" (if outline disabled) — lore shows "Outline: OFF".
+             LIME_DYE "Outline Settings" (if outline enabled)  — lore shows "Outline: ON".
+    Slot 13: CHEST "Your Claim" — lore shows (chunk claims prepend Type + Chunks rows):
       Owner: <player name>
       Price Paid: <cost, comma-formatted> Bops
       Upkeep: <N> Bops / Day  (yellow — with upkeep.enabled: true)
@@ -416,22 +1200,26 @@ CYCLE NAME
     Hologram rate line: "50 Bops / Hour"
     Confirm GUI: "Upkeep: 50 Bops / Hour"
 
-OUTLINE TOGGLE
-14. Slot 11 GRAY_DYE (OFF) → click → LIME_DYE (ON). Nearby players see cyan outline.
-15. Slot 11 LIME_DYE (ON) → click → GRAY_DYE (OFF). Outline stops within 1 s.
-16. Outline state survives server restart.
+OUTLINE SETTINGS (updated in v1.0.21)
+14. Slot 11 "Outline Settings" → click → opens Outline Settings GUI (27 slots).
+    Slot 4 GRAY_DYE (OFF) → click → LIME_DYE (ON). Back to manage; nearby players see outline.
+    Slot 4 LIME_DYE (ON) → click → GRAY_DYE (OFF). Outline stops within 1 s.
+15. Pick each of 7 color slots (10–16); selected shows "(Selected)" in lore.
+    Verify outline particle color changes in-game per selection.
+16. Back button (slot 22) returns to Claim Management.
+17. Outline state and color survive server restart.
 
 DELETE FLOW (unchanged)
-17. Break anchor chest → "Delete Claim?" GUI (slots 10/13/16).
-18. "Yes" → deleted, chest drops. "No" → closes, claim intact.
+18. Break anchor chest → "Delete Claim?" GUI (slots 10/13/16).
+19. "Yes" → deleted, chest drops. "No" → closes, claim intact.
 
 AUTOMATIC UPKEEP — USE /claims cycle TO TEST WITHOUT WAITING FOR MIDNIGHT
-19. FULL PAY: Create a claim. Ensure your balance ≥ dailyUpkeepCost.
+20. FULL PAY: Create a claim. Ensure your balance ≥ dailyUpkeepCost.
     Run /claims cycle.
     Verify: Bops deducted (amount = dailyUpkeepCost). Claim stays ACTIVE.
     Hologram still shows "Active" (green).
 
-20. ONLINE FAILURE — PAYMENT DUE COUNTDOWN:
+21. ONLINE FAILURE — PAYMENT DUE COUNTDOWN:
     a. Create a claim. Drop your Bops so balance < dailyUpkeepCost.
     b. Run /claims cycle.
     c. Receive chat message: "Your claim requires N Bops for upkeep.
@@ -441,71 +1229,71 @@ AUTOMATIC UPKEEP — USE /claims cycle TO TEST WITHOUT WAITING FOR MIDNIGHT
     f. Within 5 seconds: Bops deducted automatically. Chat: "Upkeep paid!"
     g. Hologram returns to "Active" (green).
 
-21. ONLINE FAILURE — COUNTDOWN EXPIRY:
-    a. Set up as in test 20 but do NOT obtain Bops.
+22. ONLINE FAILURE — COUNTDOWN EXPIRY:
+    a. Set up as in test 21 but do NOT obtain Bops.
     b. Wait 5 minutes (or reduce COUNTDOWN_TOTAL_CHECKS in UpkeepManager for faster test).
     c. Chat message: "Your claim has lost protection due to unpaid upkeep."
     d. Hologram shows "Inactive" (red).
     e. Non-owner can now break blocks inside the claim.
 
-22. ONLINE FAILURE — PLAYER GOES OFFLINE DURING COUNTDOWN:
-    a. Start countdown (test 20 steps a–d).
+23. ONLINE FAILURE — PLAYER GOES OFFLINE DURING COUNTDOWN:
+    a. Start countdown (test 21 steps a–d).
     b. Log off immediately.
     c. Server console should log: "Claim <id> → INACTIVE (owner went offline during countdown)."
     d. Log back in. Hologram shows "Inactive" (red).
 
-23. OFFLINE FAILURE:
+24. OFFLINE FAILURE:
     a. Create a claim. Drain your balance.
     b. Log off.
     c. Run /claims cycle from console (or wait for midnight).
     d. Server log: "Claim <id> → INACTIVE (owner offline, insufficient balance)."
     e. Log in. Hologram shows "Inactive" (red). No Bops deducted.
 
-24. MOST EXPENSIVE FIRST:
+25. MOST EXPENSIVE FIRST:
     a. Create 3 claims: cheap (e.g. 50/day), medium (150/day), expensive (300/day).
     b. Set balance to 200 (enough for cheap + medium but not expensive).
     c. Run /claims cycle.
     d. Expected: expensive claim → Payment Due (or INACTIVE if offline). Cheap + medium paid.
     e. Verify 200 Bops withdrawn (cheap + medium costs). Expensive claim in payment-due state.
 
-25. FIRST DAY FREE:
+26. FIRST DAY FREE:
     a. Create a claim and immediately run /claims cycle.
     b. Claim should NOT be charged (created after today's midnight).
     c. Balance unchanged.
 
-26. DELETE DURING COUNTDOWN:
-    a. Start a countdown (test 20 steps a–d).
+27. DELETE DURING COUNTDOWN:
+    a. Start a countdown (test 21 steps a–d).
     b. While claim is in "Payment Due" state, break the anchor chest and confirm deletion.
     c. Claim deleted normally. No errors in console. No further countdown messages.
 
-27. MULTIPLE CLAIMS — ALL AFFORDABLE:
+28. MULTIPLE CLAIMS — ALL AFFORDABLE:
     a. Create 3 claims with known upkeep costs.
     b. Set balance to (sum of all 3 costs).
     c. Run /claims cycle.
     d. All 3 claims paid. Single Bops withdrawal = total cost. All ACTIVE.
 
 WORLDGUARD COMPATIBILITY
-28. Create a WorldGuard region with build: deny and chest-access: deny.
+29. Create a WorldGuard region with build: deny and chest-access: deny.
     Non-owner tries to break a block inside a ChestClaims + WG overlap → blocked (WG wins).
     Owner tries to break their anchor chest inside WG deny region → block break is cancelled
     by WG; delete GUI does NOT open. ChestClaims does not interfere.
-29. Owner right-clicks their claimed chest inside WG deny region → interaction cancelled by WG;
+30. Owner right-clicks their claimed chest inside WG deny region → interaction cancelled by WG;
     Claim Management GUI does NOT open. ChestClaims does not override.
-30. Player tries to start claim setup (shears sneak+right-click) on a chest inside WG deny →
+31. Player tries to start claim setup (shears sneak+right-click) on a chest inside WG deny →
     interaction cancelled by WG; session does NOT start.
-31. Inside a WG region with build: deny, non-owner places a block → WG blocks it; ChestClaims
+32. Inside a WG region with build: deny, non-owner places a block → WG blocks it; ChestClaims
     does not add an extra "cannot place blocks" message (WG's message only).
-32. Outside any WG region (or in a WG region with build: allow) → normal ChestClaims behavior
+33. Outside any WG region (or in a WG region with build: allow) → normal ChestClaims behavior
     applies: owners can manage/delete, non-owners are blocked by ChestClaims protection.
 
 REGRESSION
-33. Non-owner right-clicks claim (no WG) → action bar message, no GUI.
-34. Non-owner breaks block inside ACTIVE claim (no WG) → blocked.
-35. Non-owner breaks block inside INACTIVE claim → allowed.
-36. /claims reload → config reloads; holograms, outline state intact.
-37. New claim purchased → hologram appears with correct owner + rate + Active.
-38. Shears border preview unaffected.
-39. upkeep.enabled: false → /claims cycle does nothing; no deductions.
+34. Non-owner right-clicks claim (no WG) → action bar message, no GUI.
+35. Non-owner breaks block inside ACTIVE claim (no WG) → blocked.
+36. Non-owner breaks block inside INACTIVE claim → allowed.
+37. /claims reload → config reloads; holograms, outline state intact.
+38. New claim purchased → hologram appears with correct owner + rate + Active.
+39. Shears border preview unaffected.
+40. upkeep.enabled: false → /claims cycle does nothing; no deductions.
 
 
 IMPORTANT: Normal claim gameplay is commandless. Players manage claims entirely
@@ -548,9 +1336,11 @@ ChestClaims/
       TeamsIntegration.java           Reflective BetterTeams API calls; only instantiated when present
     claim/
       ClaimSession.java               Setup state (anchor, pos1, pos2, containsAnchor())
-      ClaimData.java                  Confirmed claim POJO — upkeep + outline + trust + teamAccess fields
+      ClaimData.java                  Confirmed claim POJO — upkeep + outline + claimedChunks + trust fields
       ClaimState.java                 Enum: ACTIVE, INACTIVE
-      ClaimStorage.java               YAML persistence (plugins/ChestClaims/claims.yml)
+      ClaimStorage.java               YAML persistence (plugins/ChestClaims/claims.yml);
+                                      isChunkClaimed(chunkX, chunkZ, world, excludeClaimId)
+      OutlineColor.java               Enum: 7 outline colors (displayName, rgb, material)
     upkeep/
       UpkeepManager.java              Midnight cycle auto-pay; 5-min countdown; ACTIVE→INACTIVE
     command/
@@ -558,10 +1348,13 @@ ChestClaims/
     gui/
       ClaimGuiHolder.java             InventoryHolder for the setup confirm GUI
       ClaimConfirmGUI.java            Confirm purchase GUI — shows claim price + upkeep per cycle
-      ClaimManageHolder.java          InventoryHolder; Screen enum: MANAGE | DELETE_CONFIRM | ACCESS | SELECT_PLAYER
-      ClaimManageGUI.java             openManage() [outline + info + access], openDeleteConfirm()
+      ClaimManageHolder.java          InventoryHolder; Screen enum: MANAGE | DELETE_CONFIRM | ACCESS | SELECT_PLAYER | OUTLINE_SETTINGS
+      ClaimManageGUI.java             openManage() [outline + info + access + addChunk], openDeleteConfirm()
       ClaimAccessGUI.java             Claim access GUI: trusted player list, team toggle, back button
       TrustedPlayerSelectGUI.java     Online player selector for adding trusted players
+      OutlineSettingsGUI.java         Outline Settings GUI: ON/OFF toggle + 7-color picker + back
+      ChunkAddConfirmGUI.java         Add Chunk confirm GUI: confirm (slot 11) / info (slot 13) / cancel (slot 15)
+      ChunkAddConfirmHolder.java      InventoryHolder: claim + targetChunkX + targetChunkZ
     listener/
       ClaimSetupListener.java         Session map, wand events, hologram, outline mgmt
       ClaimProtectionListener.java    Block-break/place protection; trusted/team bypass
@@ -569,8 +1362,14 @@ ChestClaims/
       GUIListener.java                Confirm + manage + delete-confirm + access/select GUI clicks
       OutlineTask.java                BukkitRunnable — draws cuboid edge+corner particles
       ClaimBorderListener.java        Equip/unequip shears → start/stop per-player border preview
-      ClaimBorderTask.java            Per-player BukkitRunnable — draws borders for nearby claims
-      ClaimOutlineTask.java           Server-wide BukkitRunnable — owner-toggled outlines
+      ClaimBorderTask.java            Per-player BukkitRunnable — horizontal perimeter ring for chunk claims,
+                                      3D cuboid for custom claims (shears preview, orange color)
+      ClaimOutlineTask.java           Server-wide BukkitRunnable — owner-toggled outlines;
+                                      horizontal perimeter ring for chunk claims (per-claim color),
+                                      3D cuboid for custom claims (per-claim color)
+      ChunkSelectorListener.java      PDC-tagged NETHER_STAR selector: give, right-click, adjacency
+                                      checks (same world / not in claim / orthogonally adjacent /
+                                      not claimed by other), logout/drop cleanup
   src/main/resources/
     plugin.yml                        soft-depend: Bops, BetterTeams; permissions: chestclaims.admin
     config.yml
@@ -682,10 +1481,16 @@ CLAIM MANAGEMENT FLOW (commandless)
 -------------------------------------
 1. Owner right-clicks their claim anchor chest.
    → "Claim Management" GUI opens (3 rows, 27 slots).
-   → Slot 11: Outline toggle (LIME_DYE or GRAY_DYE)
-   → Slot 13: CHEST info item (owner, price paid, upkeep cost per cycle)
-2. Click Outline Toggle → toggles outlineEnabled, saves, GUI reopens.
-3. Press Escape → GUI closes. No change.
+   → Slot 11: Outline Settings (LIME_DYE or GRAY_DYE reflecting current ON/OFF)
+   → Slot 13: CHEST info item (type/chunks for chunk claims, owner, price paid, upkeep)
+   → Slot 15: NAME_TAG "Claim Access"
+   → Slot 22: BLUE_CONCRETE "Add Chunk" — chunk claims only, ACTIVE only
+2. Click Outline Settings (slot 11) → opens Outline Settings GUI.
+   Toggle ON/OFF at slot 4. Pick color at slots 10–16. Back at slot 22.
+3. Click Add Chunk (slot 22, chunk claims only) → gives player a NETHER_STAR
+   Chunk Selector item. Right-click a block in target chunk → validation → opens
+   ChunkAddConfirmGUI if valid.
+4. Press Escape → GUI closes. No change.
 
 
 CLAIM DELETION FLOW
@@ -741,7 +1546,10 @@ upkeep.cycle-name                      string, default "Day"
 
 messages.*  (setup-started, pos1-set, pos2-set, selection-info, anchor-outside, cancelled,
              confirmed, no-session, volume-exceeded, insufficient-funds, not-owner,
-             claim-overlap, claim-deleted, shears-lost)
+             claim-overlap, claim-deleted, shears-lost,
+             chunk-selector-given, chunk-selector-no-space, chunk-selector-cancelled,
+             chunk-added {cx}/{cz}/{cost}, chunk-not-adjacent, chunk-already-claimed,
+             chunk-already-in-claim)
 
 hologram.line1 / line2 / line3  (setup hologram)
 
@@ -767,6 +1575,9 @@ claims:
     upkeep-paid-until  — epoch ms (0 = not set; claims with 0 never expire)
     daily-upkeep-cost  — Bops per cycle = purchaseCost × (daily-cost-percent-of-purchase / 100)
     outline-enabled    — bool (default false)
+    outline-color      — String "R,G,B" (default "0,200,255" = AQUA)    [new in v1.0.21]
+    chunk-claim        — bool (default false)                             [new in v1.0.20]
+    claimed-chunks     — list of "chunkX,chunkZ" strings                 [new in v1.0.21]
     trusted-players    — list of UUID strings (default: empty list)      [new in v1.0.17]
     team-access-enabled — bool (default false)                            [new in v1.0.17]
 
@@ -777,6 +1588,9 @@ Old claims load without upkeep fields → defaults: state=ACTIVE, upkeepPaidUnti
 dailyUpkeepCost=cost×(config%/100), outlineEnabled=false.
 Old state "GRACE" → loads as INACTIVE.
 v1.0.17: claims without trusted-players or team-access-enabled → defaults: empty list, false.
+v1.0.21: claims without outline-color → defaults to "0,200,255" (AQUA).
+         chunk claims without claimed-chunks → initial chunk derived from pos1 (chunkX = pos1.x >> 4,
+         chunkZ = pos1.z >> 4).
 
 
 COMMANDS
@@ -797,7 +1611,8 @@ NOT IN THIS VERSION
 - Offline player UUID lookup for trust (v1: online-only)
 - Team ownership transfer
 - Auto deletion of INACTIVE claims
-- Claim expansion / upgrade GUIs
+- Removing individual chunks from a multi-chunk claim (shrink/undo chunk add)
+- Chunk claim expansion for custom (non-chunk) claims
 - Shared ownership / co-owners
 
 

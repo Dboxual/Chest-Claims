@@ -122,4 +122,24 @@ class OutlineTask extends BukkitRunnable {
         player.spawnParticle(Particle.DUST, loc, 1, 0.0, 0.0, 0.0, 0.0,
                 new Particle.DustOptions(color, size));
     }
+
+    /**
+     * Draws a single particle line segment for the given player.
+     * Package-private — used by chunk-claim horizontal perimeter drawing.
+     */
+    static void spawnLine(Player player, World world,
+                          double x1, double y1, double z1,
+                          double x2, double y2, double z2,
+                          Particle.DustOptions dust, int maxPerEdge) {
+        double dx = x2 - x1, dy = y2 - y1, dz = z2 - z1;
+        double len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (len < 0.01) return;
+        int steps = Math.min(maxPerEdge, Math.max(1, (int) Math.ceil(len * 2)));
+        for (int i = 0; i <= steps; i++) {
+            double t = (double) i / steps;
+            player.spawnParticle(Particle.DUST,
+                    new Location(world, x1 + dx * t, y1 + dy * t, z1 + dz * t),
+                    1, 0.0, 0.0, 0.0, 0.0, dust);
+        }
+    }
 }

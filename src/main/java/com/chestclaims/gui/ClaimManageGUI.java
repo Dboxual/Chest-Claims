@@ -2,6 +2,7 @@ package com.chestclaims.gui;
 
 import com.chestclaims.ChestClaimsPlugin;
 import com.chestclaims.claim.ClaimData;
+import com.chestclaims.claim.ClaimState;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -19,13 +20,15 @@ import java.util.Locale;
 
 public final class ClaimManageGUI {
 
-    // Main management screen (27 slots)
-    //   [ outline(11) ]   [ chest/info(13) ]   [ access(15) ]
-    public static final int OUTLINE_TOGGLE_SLOT = 11;
-    public static final int MANAGE_INFO_SLOT    = 13;
-    public static final int MANAGE_ACCESS_SLOT  = 15;
+    // Main management screen (27 slots):
+    //   [ outlineSettings(11) ]   [ chest/info(13) ]   [ access(15) ]
+    //   [ addChunk(22) ]  ← chunk claims only, when ACTIVE
+    public static final int OUTLINE_SETTINGS_SLOT = 11;
+    public static final int MANAGE_INFO_SLOT       = 13;
+    public static final int MANAGE_ACCESS_SLOT     = 15;
+    public static final int ADD_CHUNK_SLOT         = 22;
 
-    // Delete-confirmation screen (27 slots)
+    // Delete-confirmation screen (27 slots):
     //   [ yes(10) ]   [ warn(13) ]   [ no(16) ]
     public static final int DELETE_YES_SLOT  = 10;
     public static final int DELETE_WARN_SLOT = 13;
@@ -41,26 +44,31 @@ public final class ClaimManageGUI {
                 Component.text("Claim Management", NamedTextColor.DARK_AQUA));
         holder.setInventory(inv);
 
-        inv.setItem(OUTLINE_TOGGLE_SLOT, outlineToggleItem(claim));
-        inv.setItem(MANAGE_INFO_SLOT,    infoItem(claim, plugin));
-        inv.setItem(MANAGE_ACCESS_SLOT,  accessItem());
+        inv.setItem(OUTLINE_SETTINGS_SLOT, outlineSettingsItem(claim));
+        inv.setItem(MANAGE_INFO_SLOT,      infoItem(claim, plugin));
+        inv.setItem(MANAGE_ACCESS_SLOT,    accessItem());
+
+        if (claim.isChunkClaim() && claim.getState() == ClaimState.ACTIVE) {
+            inv.setItem(ADD_CHUNK_SLOT, addChunkItem());
+        }
 
         player.openInventory(inv);
     }
 
-    private static ItemStack outlineToggleItem(ClaimData claim) {
+    private static ItemStack outlineSettingsItem(ClaimData claim) {
         boolean enabled = claim.isOutlineEnabled();
         ItemStack item = new ItemStack(enabled ? Material.LIME_DYE : Material.GRAY_DYE);
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(enabled
-                ? txt("Claim Outline: ON",  NamedTextColor.GREEN)
-                : txt("Claim Outline: OFF", NamedTextColor.GRAY));
+        meta.displayName(txt("Outline Settings", NamedTextColor.AQUA));
         meta.lore(List.of(
                 Component.empty(),
-                txt("Show claim boundaries to nearby", NamedTextColor.GRAY),
-                txt("players with particles.",          NamedTextColor.GRAY),
+                row("Outline:", enabled ? "ON" : "OFF",
+                        enabled ? NamedTextColor.GREEN : NamedTextColor.GRAY),
                 Component.empty(),
-                txt("Click to " + (enabled ? "disable" : "enable") + ".", NamedTextColor.YELLOW)
+                txt("Choose outline color and toggle", NamedTextColor.GRAY),
+                txt("visibility for this claim.",       NamedTextColor.GRAY),
+                Component.empty(),
+                txt("Click to open settings.",          NamedTextColor.YELLOW)
         ));
         item.setItemMeta(meta);
         return item;
@@ -78,7 +86,9 @@ public final class ClaimManageGUI {
         List<Component> lore = new ArrayList<>();
         lore.add(Component.empty());
         if (claim.isChunkClaim()) {
+            int chunkCount = claim.getClaimedChunks().size();
             lore.add(row("Type:", "Chunk Claim", NamedTextColor.AQUA));
+            lore.add(row("Chunks:", chunkCount + " chunk(s)", NamedTextColor.WHITE));
         }
         lore.add(row("Owner:",      claim.getOwnerName(), NamedTextColor.WHITE));
         lore.add(row("Price Paid:", pricePaid,            NamedTextColor.YELLOW));
@@ -105,6 +115,25 @@ public final class ClaimManageGUI {
                 txt("team access for this claim.", NamedTextColor.GRAY),
                 Component.empty(),
                 txt("Click to manage.", NamedTextColor.YELLOW)
+        ));
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private static ItemStack addChunkItem() {
+        ItemStack item = new ItemStack(Material.BLUE_CONCRETE);
+        ItemMeta meta = item.getItemMeta();
+        meta.displayName(txt("Add Chunk", NamedTextColor.AQUA));
+        meta.lore(List.of(
+                Component.empty(),
+                txt("Expand your claim into an adjacent", NamedTextColor.GRAY),
+                txt("chunk. You will receive a Chunk",    NamedTextColor.GRAY),
+                txt("Selector to place inside the",       NamedTextColor.GRAY),
+                txt("target chunk.",                      NamedTextColor.GRAY),
+                Component.empty(),
+                txt("Cost: see chunk claim price.",       NamedTextColor.YELLOW),
+                Component.empty(),
+                txt("Click to start.",                    NamedTextColor.YELLOW)
         ));
         item.setItemMeta(meta);
         return item;

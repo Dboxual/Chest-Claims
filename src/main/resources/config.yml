@@ -29,6 +29,13 @@ messages:
   claim-overlap: "&cThat area overlaps with an existing claim."
   claim-deleted: "&aClaim deleted."
   shears-lost: "&cClaim setup cancelled because you stopped holding shears."
+  chunk-selector-given: "&aChunk Selector given! Right-click a block inside the chunk you want to add."
+  chunk-selector-no-space: "&cYour inventory is full. Free up a slot to receive the Chunk Selector."
+  chunk-selector-cancelled: "&cChunk selection cancelled."
+  chunk-added: "&aChunk ({cx}, {cz}) added to your claim! Charged &e{cost} Bops&a."
+  chunk-not-adjacent: "&cThat chunk is not connected to your existing claim."
+  chunk-already-claimed: "&cThat chunk is already claimed by someone else."
+  chunk-already-in-claim: "&cThat chunk is already part of your claim."
 
 hologram:
   line1: "&6&lClaim Setup"
